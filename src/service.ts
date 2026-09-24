@@ -313,7 +313,16 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
     if (anchor.exitCode !== 0) return undefined
     const baseCommit = anchor.stdout.trim()
     if (baseCommit === '') return undefined
-    return { cwd: toplevel, isRepo: true, baseCommit, capturedAt: Date.now() }
+    // The recovered baseline needs its own private index too: every comparison
+    // materializes the worktree through it (a baseline without one has no
+    // trustworthy comparison and would read as "no data").
+    return {
+      cwd: toplevel,
+      isRepo: true,
+      baseCommit,
+      indexFile: join(tmpdir(), `dsh-git-pilot-index-${randomUUID()}`),
+      capturedAt: Date.now(),
+    }
   }
 
   const ensureBaseline = async (sessionId: string, workspacePath: string | undefined, signal?: AbortSignal): Promise<SessionBaseline | undefined> => {
@@ -551,16 +560,28 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       const normalized = assertRegisteredWorkspace(workspacePath)
       const toplevel = await resolveToplevel(git, normalized, signal)
       if (toplevel === undefined) return { repo: false, files: [], total: 0, added: 0, deleted: 0, truncated: false }
-      const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
-      const baseCommit = head.exitCode === 0 ? head.stdout.trim() : undefined
       // A synthetic baseline pinned at HEAD turns the session comparator into
-      // the uncommitted-scope comparator without duplicating its logic.
-      return collectChanges(git, {
-        cwd: toplevel,
-        isRepo: true,
-        ...(baseCommit === undefined || baseCommit === '' ? {} : { baseCommit }),
-        capturedAt: Date.now(),
-      }, signal)
+      // the uncommitted-scope comparator; it needs its own private index, and
+      // this call owns that temp file's lifetime.
+      const indexFile = join(tmpdir(), `dsh-git-pilot-index-${randomUUID()}`)
+      try {
+        const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
+        const baseCommit = head.exitCode === 0 ? head.stdout.trim() : undefined
+        const seeded = await git.run(
+          baseCommit === undefined ? ['read-tree', '--empty'] : ['read-tree', baseCommit],
+          { cwd: toplevel, signal, env: { GIT_INDEX_FILE: indexFile } },
+        )
+        if (seeded.exitCode !== 0) return undefined
+        return await collectChanges(git, {
+          cwd: toplevel,
+          isRepo: true,
+          ...(baseCommit === undefined ? {} : { baseCommit }),
+          indexFile,
+          capturedAt: Date.now(),
+        }, signal)
+      } finally {
+        rmSync(indexFile, { force: true })
+      }
     },
 
     async uncommittedFileDiff(workspacePath, path, signal = lifetime.signal): Promise<FileDiffView | undefined> {
@@ -569,14 +590,25 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       const normalized = assertRegisteredWorkspace(workspacePath)
       const toplevel = await resolveToplevel(git, normalized, signal)
       if (toplevel === undefined) return undefined
-      const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
-      const baseCommit = head.exitCode === 0 ? head.stdout.trim() : undefined
-      return buildFileDiff(git, {
-        cwd: toplevel,
-        isRepo: true,
-        ...(baseCommit === undefined || baseCommit === '' ? {} : { baseCommit }),
-        capturedAt: Date.now(),
-      }, path, signal)
+      const indexFile = join(tmpdir(), `dsh-git-pilot-index-${randomUUID()}`)
+      try {
+        const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
+        const baseCommit = head.exitCode === 0 ? head.stdout.trim() : undefined
+        const seeded = await git.run(
+          baseCommit === undefined ? ['read-tree', '--empty'] : ['read-tree', baseCommit],
+          { cwd: toplevel, signal, env: { GIT_INDEX_FILE: indexFile } },
+        )
+        if (seeded.exitCode !== 0) return undefined
+        return await buildFileDiff(git, {
+          cwd: toplevel,
+          isRepo: true,
+          ...(baseCommit === undefined ? {} : { baseCommit }),
+          indexFile,
+          capturedAt: Date.now(),
+        }, path, signal)
+      } finally {
+        rmSync(indexFile, { force: true })
+      }
     },
 
     forgetSession(sessionId): void {

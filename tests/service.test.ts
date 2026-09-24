@@ -51,6 +51,38 @@ describe('session baseline snapshot (R5-1)', () => {
   })
 })
 
+describe('resumed baselines and the uncommitted scope', () => {
+  it('re-attaches a restarted session to its anchored baseline with a usable index', async () => {
+    const repo = await seedRepo()
+    const agents = { list: () => [], get: () => ({ session: { header: { cwd: repo.root } } }) }
+    const first = service({ repo, agents })
+    await first.sessionChanges('s-resume') // captures the baseline and anchors it
+    await repo.write('after.txt', 'later work\n')
+    first.dispose()
+    // A fresh service is a restarted host: only the anchor ref survives.
+    const second = service({ repo, agents })
+    const view = await second.sessionChanges('s-resume')
+    expect(view).toBeDefined()
+    expect(view?.files.map(file => file.path)).toContain('after.txt')
+    second.dispose()
+    await repo.dispose()
+  })
+
+  it('serves the worktree-vs-HEAD scope through its own private index', async () => {
+    const repo = await seedRepo()
+    await repo.write('a.txt', 'one\ntwo\nthree\n')
+    await repo.write('new.txt', 'x\ny\n')
+    const svc = service({ repo })
+    const view = await svc.uncommittedChanges(repo.root)
+    expect(view?.files.map(file => file.path).sort()).toEqual(['a.txt', 'new.txt'])
+    expect(view?.added).toBe(1 + 2)
+    const diff = await svc.uncommittedFileDiff(repo.root, 'new.txt')
+    expect(diff).toMatchObject({ kind: 'text' })
+    svc.dispose()
+    await repo.dispose()
+  })
+})
+
 describe('isProtectedBranch', () => {
   it('matches exact names and trailing wildcards', () => {
     const patterns = ['master', 'main', 'release/*']

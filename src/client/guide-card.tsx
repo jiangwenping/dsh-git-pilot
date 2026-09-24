@@ -28,23 +28,48 @@ export type GitPilotGuideProps =
 /** Milliseconds between background stat refreshes while the card is mounted. */
 const REFRESH_INTERVAL_MS = 30_000
 
+/**
+ * The shipped guide capsules' own geometry (sidebar-right's guide entries):
+ * same border, radius, layer, padding, and type scale, so this card sits in
+ * the list without looking foreign.
+ */
 const styles = {
   entry: {
+    boxSizing: 'border-box' as const,
     display: 'flex',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'flex-start',
+    gap: 14,
     width: '100%',
-    padding: '12px 14px',
-    borderRadius: 10,
-    border: '1px solid var(--dsw-alias-border-subtle, #2c2c30)',
-    background: 'var(--dsw-alias-surface-raised, #1b1b1e)',
+    minWidth: 0,
+    minHeight: 56,
+    overflow: 'hidden',
+    padding: '14px 20px',
+    border: '0.5px solid var(--dsw-alias-border-l3)',
+    borderRadius: 24,
+    background: 'var(--dsw-alias-bg-layer-1)',
+    color: 'inherit',
     cursor: 'pointer',
     textAlign: 'left' as const,
   },
-  icon: { color: 'var(--dsw-alias-label-secondary, #9a9aa0)', flexShrink: 0, display: 'flex' },
-  text: { display: 'flex', flexDirection: 'column' as const, gap: 2, minWidth: 0 },
-  title: { color: 'var(--dsw-alias-label-primary, #ececec)', fontSize: 13, fontWeight: 500 },
-  description: { color: 'var(--dsw-alias-label-secondary, #9a9aa0)', fontSize: 12 },
+  icon: { flex: 'none', display: 'flex', color: 'var(--dsw-alias-label-tertiary)' },
+  text: { display: 'flex', flexDirection: 'column' as const, gap: 3, minWidth: 0 },
+  title: {
+    overflow: 'hidden',
+    color: 'var(--dsw-alias-label-primary)',
+    fontSize: 14,
+    lineHeight: 1.4,
+    whiteSpace: 'nowrap' as const,
+    textOverflow: 'ellipsis',
+  },
+  description: {
+    overflow: 'hidden',
+    color: 'var(--dsw-alias-label-caption)',
+    fontSize: 13,
+    lineHeight: 1.4,
+    whiteSpace: 'nowrap' as const,
+    textOverflow: 'ellipsis',
+  },
 }
 
 type Stats = { phase: 'loading' } | { phase: 'ready'; view: SessionChangesView | undefined }
@@ -58,7 +83,9 @@ type Stats = { phase: 'loading' } | { phase: 'ready'; view: SessionChangesView |
 export function GitPilotGuide({ kind, title, useTabInfo, changes, sessionId, t }: GitPilotGuideProps): ReactNode {
   const { tab } = useTabInfo()
   const [state, setState] = useState<Stats>({ phase: 'loading' })
-  const fingerprintRef = useRef<string | undefined>(undefined)
+  // `null` = nothing applied yet: the first settle always moves the card out of
+  // its loading state, including the "no data" answer.
+  const fingerprintRef = useRef<string | null>(null)
   // The injected closure is rebuilt per parent render; reading it through a
   // ref keeps the poll on the latest session data without re-subscribing.
   const changesRef = useRef(changes)
@@ -71,7 +98,7 @@ export function GitPilotGuide({ kind, title, useTabInfo, changes, sessionId, t }
       void changesRef.current().then(view => {
         if (stopped) return
         const fingerprint = view === undefined
-          ? undefined
+          ? 'no-data'
           : JSON.stringify([view.total, view.added, view.deleted, view.files.map(file => `${file.status}:${file.path}:${file.added}:${file.deleted}`)])
         if (fingerprint === fingerprintRef.current) return
         fingerprintRef.current = fingerprint
