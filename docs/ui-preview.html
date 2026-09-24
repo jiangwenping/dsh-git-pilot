@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dsh-git-pilot 安装后界面预览</title>
+<style>
+  :root {
+    --bg: #141414;
+    --bg-base: #161616;
+    --overlay: #1f1f22;
+    --border: rgba(128,128,128,0.25);
+    --border-soft: rgba(128,128,128,0.18);
+    --label: #ececec;
+    --label-2: #9a9a9a;
+    --brand: #4c8dff;
+    --green: #4ec96a;
+    --red: #ff6b6b;
+    --warn: #e0a34a;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #0d0d0d;
+    color: var(--label);
+    font-family: -apple-system, "PingFang SC", "Segoe UI", sans-serif;
+    font-size: 13px;
+    padding: 28px 24px 60px;
+  }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 6px; }
+  .sub { color: var(--label-2); font-size: 13px; margin-bottom: 28px; }
+  .panel {
+    background: var(--bg-base);
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 30px;
+  }
+  .panel-title {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 16px;
+    background: #101010;
+    border-bottom: 1px solid var(--border-soft);
+    font-size: 12px; color: var(--label-2);
+  }
+  .panel-title .no {
+    background: var(--brand); color: #fff; border-radius: 10px;
+    padding: 1px 8px; font-weight: 600; font-size: 11px;
+  }
+  .canvas { position: relative; padding: 26px 30px 34px; }
+  .callout {
+    position: absolute;
+    font-size: 11px; line-height: 1.5; color: #d9b96a;
+    max-width: 210px;
+  }
+  .callout b { color: #f0cd7e; }
+  .callout .line { color: rgba(217,185,106,0.4); }
+
+  /* ── 模拟 DSH 布局 ── */
+  .dsh { display: flex; border-radius: 10px; overflow: hidden; border: 1px solid var(--border-soft); min-height: 420px; }
+  .dsh .side { width: 168px; background: #101010; padding: 14px 10px; border-right: 1px solid var(--border-soft); flex-shrink: 0; }
+  .dsh .side .item { color: #8f8f8f; font-size: 12px; padding: 6px 8px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dsh .side .item.active { background: rgba(128,128,128,0.14); color: var(--label); }
+  .dsh .side .group { color: #6f6f6f; font-size: 11px; padding: 12px 8px 4px; }
+  .dsh .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .dsh .conv { flex: 1; padding: 22px 26px 8px; color: #bdbdbd; font-size: 13px; }
+  .dsh .conv .msg { background: #1a1a1c; border: 1px solid var(--border-soft); border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; max-width: 560px; }
+  .dsh .conv .reply { color: #cfcfcf; max-width: 560px; }
+  .dsh .right { width: 240px; background: #18181a; border-left: 1px solid var(--border-soft); flex-shrink: 0; }
+
+  /* ── composer ── */
+  .composer {
+    margin: 0 26px 14px;
+    background: #1c1c1f;
+    border: 1px solid var(--border-soft);
+    border-radius: 12px;
+    padding: 12px 14px 10px;
+  }
+  .composer .ph { color: #6d6d6d; margin-bottom: 26px; }
+  .composer .tools { display: flex; align-items: center; gap: 14px; color: var(--label-2); font-size: 12px; }
+  .composer .tools .btn { display: inline-flex; align-items: center; gap: 5px; }
+  .composer .tools .send { margin-left: auto; background: #e8e8e8; color: #111; border-radius: 14px; padding: 3px 12px; font-weight: 600; }
+  .composer-row-under {
+    display: flex; align-items: center; gap: 6px;
+    margin: 8px 26px 0;
+    padding-bottom: 14px;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    background: transparent; color: var(--label-2);
+    font-size: 12px; line-height: 18px; padding: 3px 6px;
+    border-radius: 6px; border: 1px solid transparent;
+    cursor: pointer; white-space: nowrap;
+  }
+  .chip:hover { border-color: var(--border-soft); }
+  .chip .arr { font-size: 10px; opacity: 0.7; }
+  .badge { color: var(--warn); font-size: 12px; padding: 3px 6px; border-radius: 6px; cursor: pointer; }
+  .mock-input { width: 100%; background: #161618; border: 1px solid var(--border-soft); border-radius: 8px; color: #777; font-size: 12px; padding: 6px 10px; }
+
+  /* ── 分支下拉 ── */
+  .menu {
+    width: 340px;
+    background: var(--overlay);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+    padding: 6px;
+    color: var(--label);
+  }
+  .menu .search {
+    width: 100%; background: transparent; border: none; outline: none;
+    color: inherit; font-size: 13px; padding: 8px 10px;
+  }
+  .menu .caret { color: #6f6f6f; }
+  .menu .item {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    width: 100%; border: none; background: transparent; color: inherit;
+    text-align: left; font-size: 13px; padding: 7px 10px; border-radius: 8px; cursor: pointer;
+  }
+  .menu .item:hover { background: rgba(128,128,128,0.10); }
+  .menu .item.current { background: rgba(128,128,128,0.12); }
+  .menu .item .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 12px; }
+  .menu .section { font-size: 11px; color: #8a8a8a; padding: 6px 10px 2px; }
+  .menu .note { font-size: 12px; color: #8a8a8a; padding: 6px 10px; }
+  .menu .create-row { display: flex; gap: 6px; padding: 6px 4px; }
+  .menu .create-input {
+    flex: 1; background: transparent; border: 1px solid rgba(128,128,128,0.3);
+    border-radius: 8px; outline: none; color: inherit; font-size: 13px; padding: 6px 10px;
+    font-family: var(--mono); font-size: 12px;
+  }
+  .menu .button {
+    border: 1px solid rgba(128,128,128,0.3); background: transparent;
+    color: var(--brand); font-size: 12px; border-radius: 8px; padding: 5px 10px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .menu .warn {
+    font-size: 12px; line-height: 18px; color: var(--label);
+    background: rgba(255,180,80,0.10); border: 1px solid rgba(255,180,80,0.35);
+    border-radius: 8px; padding: 8px 10px; margin: 4px;
+  }
+  .menu .error { font-size: 12px; color: var(--red); padding: 4px 10px; }
+  .menu .plus { color: var(--brand); }
+  .grid2 { display: flex; gap: 26px; flex-wrap: wrap; }
+  .grid2 > div { flex: 1; min-width: 300px; }
+  .cap { color: var(--label-2); font-size: 12px; margin: 0 0 10px; }
+
+  /* ── Changes 标签页 ── */
+  .changes { display: flex; flex-direction: column; height: 100%; font-size: 13px; }
+  .changes .head { padding: 14px 16px 8px; }
+  .changes .on { font-size: 12px; color: var(--label-2); }
+  .changes .totals { font-size: 13px; margin-top: 3px; }
+  .changes .add { color: var(--green); }
+  .changes .del { color: var(--red); }
+  .changes .toolbar { display: flex; justify-content: flex-end; gap: 6px; padding: 0 14px 6px; }
+  .changes .toolbar .rbtn {
+    border: 1px solid rgba(128,128,128,0.3); background: transparent;
+    color: var(--label-2); font-size: 12px; border-radius: 8px; padding: 3px 10px; cursor: pointer;
+  }
+  .changes ul { list-style: none; margin: 0; padding: 2px 8px 12px; overflow-y: auto; flex: 1; }
+  .changes li.row { border-radius: 8px; padding: 6px 8px; cursor: pointer; }
+  .changes li.row:hover { background: rgba(128,128,128,0.08); }
+  .changes .rowhead { display: flex; align-items: center; gap: 8px; }
+  .changes .sb {
+    font-size: 11px; color: var(--label-2);
+    border: 1px solid rgba(128,128,128,0.3); border-radius: 5px; padding: 0 4px;
+    flex-shrink: 0;
+  }
+  .changes .path { font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; color: #dedede; }
+  .changes .counts { font-size: 12px; white-space: nowrap; }
+  .changes .note { color: var(--label-2); font-size: 12px; padding: 0 2px; }
+  .changes .diff {
+    margin: 6px 0 4px; border: 1px solid rgba(128,128,128,0.2); border-radius: 8px;
+    overflow-x: auto; background: var(--bg-base);
+    font-family: var(--mono); font-size: 12px; line-height: 18px;
+  }
+  .changes .dl { display: flex; white-space: pre; }
+  .changes .ln { color: #777; padding: 0 6px; text-align: right; min-width: 34px; flex-shrink: 0; user-select: none; }
+  .changes .hunk { color: #8a8a8a; padding: 0 6px; background: rgba(128,128,128,0.10); }
+  .changes .l-add { color: var(--green); background: rgba(78,201,106,0.10); }
+  .changes .l-del { color: var(--red); background: rgba(255,107,107,0.10); }
+  .changes .l-ctx { color: #c9c9c9; }
+  .tabs { display: flex; gap: 4px; padding: 10px 10px 0; }
+  .tabs .tab { font-size: 12px; color: #8f8f8f; padding: 5px 12px; border-radius: 8px 8px 0 0; }
+  .tabs .tab.active { background: #202023; color: var(--label); }
+  .tag-plugin {
+    display: inline-block; margin-left: 6px; font-size: 10px; font-weight: 600;
+    color: var(--brand); border: 1px solid rgba(76,141,255,0.4);
+    border-radius: 4px; padding: 0 5px; vertical-align: 1px;
+  }
+</style>
+</head>
+<body>
+
+<h1>dsh-git-pilot · 安装后界面预览</h1>
+<div class="sub">按插件真实组件样式绘制（配色取自 DSH 主题 token）。三个挂载面：输入框下方的分支行、点击分支的菜单、右侧栏的 Changes 标签页。<span class="tag-plugin">插件 UI</span> 标签标注的均为本插件渲染的内容，其余为 DSH 原生界面。</div>
+
+<!-- ──────────── 1. 会话页 ──────────── -->
+<div class="panel">
+  <div class="panel-title"><span class="no">1</span> 会话页 · 输入框下方出现分支行（挂载点 conversation.composer.dock）</div>
+  <div class="canvas">
+    <div class="dsh">
+      <div class="side">
+        <div class="item">＋ New Chat</div>
+        <div class="group">Workspaces</div>
+        <div class="item">ins-bd-platform</div>
+        <div class="item active">ins-bd-internal</div>
+        <div class="item">清理算法与系统参数</div>
+        <div class="item">ins-im-platform</div>
+      </div>
+      <div class="main">
+        <div class="conv">
+          <div class="msg">把订单导出接口改成异步导出</div>
+          <div class="reply">好的，我先看一下现有的导出实现……<br>已完成 3 处修改，涉及 2 个文件。</div>
+        </div>
+        <div class="composer">
+          <div class="ph">Send follow-up</div>
+          <div class="tools">
+            <span class="btn">＋</span>
+            <span class="btn">Auto ⌄</span>
+            <span class="btn" style="margin-left:auto">🎙</span>
+            <span class="send">发送</span>
+          </div>
+        </div>
+        <div class="composer-row-under">
+          <span class="chip" style="color:var(--label); font-weight:500;">📁 ins-bd-internal</span>
+          <span class="chip" style="border:1px solid var(--border-soft); background:#1c1c1f;">
+            <span>⎇</span>
+            <span style="color:var(--label)">feature/20260917-vue3</span>
+            <span class="arr">▼</span>
+          </span>
+          <span class="badge">±3</span>
+        </div>
+      </div>
+      <div class="right"></div>
+    </div>
+    <div class="callout" style="right:36px; top:120px; width:200px;">
+      <b>项目 chip</b>：显示当前工作区名（FR-1.4，只读展示）<br>
+      <span class="line">│</span><br>
+      <b>分支行</b>（composerBranchRow 开启时）<br>
+      · 选完项目的瞬间自动带出当前分支<br>
+      · 非 git 目录整行不渲染<br>
+      <span class="line">│</span><br>
+      <b>±N 徽标</b>（changesPanel 开启时）<br>
+      · 会话产生改动后出现<br>
+      · 点击直接打开右侧 Changes 面板<br>
+      · 第一次出现时自动打开面板（autoOpenChanges: firstTurn）
+    </div>
+  </div>
+</div>
+
+<!-- ──────────── 2. 分支下拉 ──────────── -->
+<div class="panel">
+  <div class="panel-title"><span class="no">2</span> 点击分支 chip → 下拉菜单（搜索 / 切换 / 创建，含确认态）</div>
+  <div class="canvas">
+    <div class="grid2">
+      <div>
+        <p class="cap">正常态：搜索、当前分支 ✓、远程分组、创建入口</p>
+        <div class="menu">
+          <input class="search" placeholder="搜索分支…" value="feature">
+          <div class="item current"><span class="nm">feature/20260917-vue3</span><span>✓</span></div>
+          <div class="item"><span class="nm">feature/20260812-hpo</span></div>
+          <div class="item"><span class="nm">feature/20260305-hpo</span></div>
+          <div class="section">远程分支</div>
+          <div class="item"><span class="nm">origin/release/202609</span></div>
+          <div class="note">分支过多，仅显示部分</div>
+          <div class="create-row">
+            <input class="create-input" value="feature/20260923-">
+            <button class="button">创建并切换</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="cap">确认态：三重护栏（脏工作区 / 忙碌会话 / 保护分支）</p>
+        <div class="menu">
+          <input class="search" placeholder="搜索分支…" value="">
+          <div class="item current"><span class="nm">feature/20260917-vue3</span><span>✓</span></div>
+          <div class="item"><span class="nm">master</span></div>
+          <div class="warn">工作区有 3 个未提交文件，切换可能带来冲突或把改动带到新分支。仍要切换吗？</div>
+          <div class="create-row">
+            <button class="button">切换</button>
+            <button class="button">取消</button>
+          </div>
+          <div class="create-row">
+            <input class="create-input" value="feature/20260923-">
+            <button class="button">创建并切换</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <p class="cap" style="margin-top:18px">要点：搜索自动聚焦，Esc / 点击外部关闭，再次点击 chip 收起；远程分支开关（remoteBranches）默认关闭；重名时按钮变「切换到该分支」；非法名（如 <span style="font-family:var(--mono)">a..b</span>）在本地即报错，不走网络。</p>
+  </div>
+</div>
+
+<!-- ──────────── 3. 右侧栏 Changes ──────────── -->
+<div class="panel">
+  <div class="panel-title"><span class="no">3</span> 右侧栏新增「变更」标签页（挂载点 sidebar.right.pane.tab）</div>
+  <div class="canvas" style="padding: 26px 30px;">
+    <div class="dsh" style="min-height: 430px;">
+      <div class="side">
+        <div class="item active">对话</div>
+        <div class="item">终端</div>
+        <div class="item">文件</div>
+        <div class="item">设定</div>
+      </div>
+      <div class="main">
+        <div class="conv">
+          <div class="msg">把订单导出接口改成异步导出</div>
+          <div class="reply">已完成。修改了导出服务与任务表结构，并新增了进度查询接口……</div>
+          <div class="msg" style="margin-top:18px; color:#8f8f8f; font-size:12px;">↑ 官方每 turn 变更卡片仍正常工作，与本面板并存</div>
+        </div>
+        <div class="composer">
+          <div class="ph">Send follow-up</div>
+          <div class="tools"><span class="btn">＋</span><span class="btn">Auto ⌄</span><span class="send" style="margin-left:auto">发送</span></div>
+        </div>
+        <div class="composer-row-under">
+          <span class="chip">⎇ <span style="color:var(--label)">feature/20260917-vue3</span> <span class="arr">▼</span></span>
+        </div>
+      </div>
+      <div class="right">
+        <div class="tabs">
+          <div class="tab">预览</div>
+          <div class="tab active">变更<span class="tag-plugin">插件</span></div>
+          <div class="tab">终端</div>
+        </div>
+        <div class="changes">
+          <div class="head">
+            <div class="on">On feature/20260917-vue3</div>
+            <div class="totals">4 个文件 · <span class="add">+160</span> <span class="del">−9</span></div>
+          </div>
+          <div class="toolbar">
+            <button class="rbtn">全部展开</button>
+            <button class="rbtn">刷新</button>
+          </div>
+          <ul>
+            <li class="row">
+              <div class="rowhead">
+                <span class="sb">修改</span>
+                <span class="path">src/service/order-export.ts</span>
+                <span class="counts"><span class="add">+38</span> <span class="del">−9</span></span>
+              </div>
+              <div class="diff">
+                <div class="dl hunk">@@ -12,7 +12,9 @@</div>
+                <div class="dl"><span class="ln"> 12  12</span><span class="l-ctx"> </span></div>
+                <div class="dl"><span class="ln"> 13  13</span><span class="l-ctx"> export async function exportOrders() {</span></div>
+                <div class="dl"><span class="ln"> 14    </span><span class="l-del">-  return exportSync(query)</span></div>
+                <div class="dl"><span class="ln">    14</span><span class="l-add">+  const taskId = await taskService.create(query)</span></div>
+                <div class="dl"><span class="ln">    15</span><span class="l-add">+  return { taskId }</span></div>
+                <div class="dl"><span class="ln"> 15  16</span><span class="l-ctx"> }</span></div>
+              </div>
+            </li>
+            <li class="row">
+              <div class="rowhead">
+                <span class="sb">新增</span>
+                <span class="path">src/git/diff.ts</span>
+                <span class="counts"><span class="add">+156</span> <span class="del">−0</span></span>
+              </div>
+            </li>
+            <li class="row">
+              <div class="rowhead">
+                <span class="sb">删除</span>
+                <span class="path">src/legacy/export-v1.ts</span>
+                <span class="counts"><span class="add">+0</span> <span class="del">−9</span></span>
+              </div>
+            </li>
+            <li class="row">
+              <div class="rowhead">
+                <span class="sb">未跟踪</span>
+                <span class="path">notes/async-plan.md</span>
+                <span class="counts"><span class="add">+4</span> <span class="del">−0</span></span>
+              </div>
+            </li>
+            <li class="row">
+              <div class="rowhead">
+                <span class="sb">子模块</span>
+                <span class="path">vendor/sdk</span>
+                <span class="note">子模块</span>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <p class="cap" style="margin-top:16px">统计口径：<b>会话创建时刻的仓库状态 → 当前工作区</b> 的累计变化。Agent 用 Bash 改的文件、中途的 git commit 都如实计入；跨 turn 的反复重写不会重复计数。切换分支后统计自动按新分支重置（面板给一次性提示）。</p>
+  </div>
+</div>
+
+<!-- ──────────── 4. 细节态 ──────────── -->
+<div class="panel">
+  <div class="panel-title"><span class="no">4</span> 其他状态一瞥</div>
+  <div class="canvas">
+    <div class="grid2">
+      <div>
+        <p class="cap">非 git 仓库 → 一切插件 UI 不渲染（零噪音）</p>
+        <div class="composer-row-under" style="border:1px dashed var(--border-soft); border-radius:8px; padding:10px; color:#6f6f6f; font-size:12px;">
+          （无分支行、无徽标；Changes 面板不注册）
+        </div>
+      </div>
+      <div>
+        <p class="cap">分离 HEAD → 显示短 hash + 提示</p>
+        <span class="chip" style="border:1px solid var(--border-soft);">⎇ <span style="color:var(--label)">3fa2c81 (detached)</span> <span class="arr">▼</span></span>
+      </div>
+      <div>
+        <p class="cap">工具行左侧的紧凑 chip（branchChip，可关）</p>
+        <div style="display:flex; align-items:center; gap:12px; background:#1c1c1f; border:1px solid var(--border-soft); border-radius:10px; padding:8px 12px;">
+          <span class="chip" style="font-size:11px;">⎇ <span style="color:var(--label)">feature/x</span> <span class="arr">▼</span></span>
+          <span style="color:#8f8f8f; font-size:12px;">Auto ⌄</span>
+          <span style="margin-left:auto; color:#8f8f8f; font-size:12px;">Plan</span>
+        </div>
+      </div>
+      <div>
+        <p class="cap">创建重名时 → 引导直接切换</p>
+        <div class="menu" style="width:300px;">
+          <div class="warn">分支 feature/x 已存在</div>
+          <div class="create-row">
+            <button class="button">切换到该分支</button>
+            <button class="button">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="sub" style="margin-top:8px">
+  安装后即得：无需任何配置，挂载到 DSH Web GUI；所有表面在非 git 目录 / git 缺失 / 对应配置关闭时自动消失。
+</div>
+
+</body>
+</html>

@@ -1,0 +1,23 @@
+# Mount the Git pilot into a DSH profile. A profile's final patch may replace
+# this config row as a whole; use user settings or the plugin manager for
+# one-field overrides.
+- insert:
+    - id: git-pilot
+      name: dsh-git-pilot
+      config:
+        enabled: true
+        branchChip: true
+        composerBranchRow: false
+        changesPanel: true
+        autoOpenChanges: firstTurn
+        remoteBranches: false
+        autoFetch: false
+        timeoutMs: 10000
+        maxBranches: 200
+        maxFiles: 500
+        maxFileBytes: 2097152
+        branchNameTemplate: feature/YYYYMMDD-
+        protectedBranches:
+          - master
+          - main
+          - release/*
