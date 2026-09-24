@@ -39,6 +39,7 @@ export type GitPilotKey =
   | 'changes.loadFailed'
   | 'guide.description'
   | 'guide.loading'
+  | 'guide.uncommittedSummary'
   | 'scope.uncommitted'
   | 'scope.session'
   | 'changes.noData'
@@ -96,8 +97,9 @@ export const zh: Record<GitPilotKey, string> = {
   'changes.loadFailed': '加载失败',
   'changes.noData': '暂无数据',
   'changes.emptyUncommitted': '工作区没有未提交的改动',
-  'guide.description': '查看本会话改动的文件与行数',
+  'guide.description': '查看工作区未提交的改动',
   'guide.loading': '统计中…',
+  'guide.uncommittedSummary': '未提交 · {files} 个文件 · +{added} −{deleted}',
   'commit.action': '提交',
   'commit.placeholder': '提交信息…',
   'commit.confirm': '确认提交',
@@ -154,8 +156,9 @@ export const en: Record<GitPilotKey, string> = {
   'changes.loadFailed': 'Failed to load',
   'changes.noData': 'No data yet',
   'changes.emptyUncommitted': 'No uncommitted changes',
-  'guide.description': 'Files and lines this session changed',
+  'guide.description': "Review the workspace's uncommitted changes",
   'guide.loading': 'Counting…',
+  'guide.uncommittedSummary': 'Uncommitted · {files} file(s) · +{added} −{deleted}',
   'commit.action': 'Commit',
   'commit.placeholder': 'Commit message…',
   'commit.confirm': 'Commit',

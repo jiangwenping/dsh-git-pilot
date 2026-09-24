@@ -120,8 +120,8 @@ export function GitPilotGuide({ kind, title, useTabInfo, changes, sessionId, t }
       : state.view.repo === false
         ? t('changes.noRepo')
         : state.view.total === 0
-          ? t('changes.empty')
-          : t('changes.summary', { files: state.view.total, added: state.view.added, deleted: state.view.deleted })
+          ? t('changes.emptyUncommitted')
+          : t('guide.uncommittedSummary', { files: state.view.total, added: state.view.added, deleted: state.view.deleted })
   return (
     <button
       type="button"

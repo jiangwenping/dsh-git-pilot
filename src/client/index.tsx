@@ -114,9 +114,18 @@ export function apply(rawContext: unknown): void {
       ctx.effect(() => slots.inject('sidebar.right.tab.guide.entry', () => slots.register(
         {
           name: 'sidebar.right.tab.guide.entry', key: GIT_PILOT_CHANGES_ID, locale: NS,
+          // The card mirrors the tab's default scope (uncommitted), so the
+          // number on the card is the number the tab opens with. Every poll
+          // re-reads the workspace, so a switch is picked up. A session without
+          // a workspace falls back to its session scope.
           inject: (sessionId: string): GitPilotGuideInjected => ({
             sessionId,
-            changes: () => api.sessionChanges(sessionId),
+            changes: () => {
+              const cwd = cwdOf(sessionId)
+              return cwd === undefined || cwd === ''
+                ? api.sessionChanges(sessionId)
+                : api.uncommitted(cwd)
+            },
           }),
         },
         GitPilotGuide,
