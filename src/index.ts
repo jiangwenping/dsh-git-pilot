@@ -89,6 +89,8 @@ export function apply(rawContext: unknown, config: GitPilotConfig): void {
 
 function applyInner(rawContext: unknown, config: GitPilotConfig): void {
   assertConfig(config)
+  // Master switch: `false` mounts no service and registers no route.
+  if (config.enabled === false) return
   const ctx = rawContext as HostContextShape
   const subprocess = ctx.subprocess as unknown as SubprocessLike
   // Both registries resolve lazily per call: load order never decides whether
