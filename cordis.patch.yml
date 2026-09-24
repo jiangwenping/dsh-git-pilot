@@ -11,7 +11,10 @@
         # entry; the chip also carries the dirty badge and Changes shortcut.
         composerBranchRow: false
         changesPanel: true
-        autoOpenChanges: firstTurn
+        # Off by choice: the panel is opened from the chip badge, the guide
+        # card, or the sidebar tab strip — never on its own. A long-lived
+        # uncommitted worktree would otherwise pop it open for every session.
+        autoOpenChanges: never
         remoteBranches: false
         autoFetch: false
         timeoutMs: 10000
