@@ -46,7 +46,7 @@ function fakeHost() {
 }
 
 describe('apply', () => {
-  it('provides the service, mounts both channels, and cleans up sessions', async () => {
+  it('provides the service, mounts the fetch routes, and cleans up sessions', async () => {
     const { ctx, calls } = fakeHost()
     apply(ctx as never, testConfig() as never)
     expect(calls.provide).toHaveLength(1)

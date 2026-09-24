@@ -9,9 +9,6 @@
  * the Loader enforces at runtime while keeping this package decoupled from the
  * host's exact cordis typings (the same seam dsh-mnemon uses).
  */
-import { appendFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
 import { Config, type GitPilotConfig, type AutoOpenChanges } from './config.ts'
 import { createGitPilotService, type GitPilotService, type WorkspaceRegistryLike, type AgentsRegistryLike } from './service.ts'
 import { registerGitPilotFetchRoutes, type ConnectionFetchRegistry } from './rpc.ts'
@@ -65,13 +62,6 @@ function readService(ctx: HostContextShape, key: string): unknown {
   }
 }
 
-const DEBUG_LOG = join(tmpdir(), 'dsh-git-pilot-debug.log')
-function debugLog(message: string): void {
-  try {
-    appendFileSync(DEBUG_LOG, `${new Date().toISOString()} ${message}\n`)
-  } catch { /* ignore */ }
-}
-
 /** Validate the numeric bounds; invalid values fail plugin load. */
 function assertConfig(config: GitPilotConfig): void {
   for (const [field, value] of [
@@ -93,18 +83,14 @@ export function apply(rawContext: unknown, config: GitPilotConfig): void {
   try {
     applyInner(rawContext, config)
   } catch (error) {
-    debugLog(`apply THREW: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`)
-    throw error
+      throw error
   }
 }
 
 function applyInner(rawContext: unknown, config: GitPilotConfig): void {
-  debugLog('apply entered')
   assertConfig(config)
-  if (config.enabled === false) { debugLog('apply: disabled, return'); return }
   const ctx = rawContext as HostContextShape
   const subprocess = ctx.subprocess as unknown as SubprocessLike
-  debugLog(`apply: subprocess=${subprocess === undefined ? 'undefined' : typeof subprocess}`)
   // Both registries resolve lazily per call: load order never decides whether
   // the path guard exists (the dsh-mnemon seam).
   const service: GitPilotService = createGitPilotService({
@@ -115,13 +101,9 @@ function applyInner(rawContext: unknown, config: GitPilotConfig): void {
     log: message => { ctx.logger?.info?.(message) },
   })
 
-  debugLog('apply: service created')
   ctx.effect(() => () => { service.dispose() }, 'dsh-git-pilot: dispose')
-  debugLog('apply: effect ok')
   ctx.provide?.('gitPilot', service)
-  debugLog('apply: provided gitPilot')
   ctx.on('session/disposed', session => { service.forgetSession(session.id) })
-  debugLog('apply: session/disposed hooked')
   // FR-2.4's proactive arm: the baseline exists from the first turn start, so
   // a Bash edit before any client call still counts as session work.
   ctx.on('session/event', (session, event) => {
@@ -129,12 +111,9 @@ function applyInner(rawContext: unknown, config: GitPilotConfig): void {
     const cwd = session.header?.cwd
     if (cwd !== undefined) void service.ensureBaseline(session.id, cwd)
   })
-  debugLog('apply: session/event hooked')
 
   // This bundle composes LAST, so the connection service is already available
   // at apply time — register the routes immediately.
   const connection = readService(ctx, 'connection') as ConnectionFetchRegistry | undefined
-  debugLog(`apply: connection=${connection === undefined ? 'undefined' : 'present'}`)
   if (connection !== undefined) registerGitPilotFetchRoutes(connection, service)
-  debugLog('apply: routes registered')
 }

@@ -20,6 +20,10 @@ const dict: Record<string, string> = {
   'changes.oversized': 'too large',
   'changes.gitlink': 'submodule',
   'menu.working': 'Working…',
+  'scope.uncommitted': 'Uncommitted',
+  'scope.session': 'This session',
+  'changes.noData': 'No data yet',
+  'changes.emptyUncommitted': 'No uncommitted changes',
 }
 
 const t = (key: string, params?: Record<string, unknown>): string =>
@@ -39,6 +43,8 @@ function fakeApi(summary: SessionChangesView | undefined, diff?: FileDiffView): 
     sessionFileDiff: async () => diff,
     uncommitted: async () => summary,
     fileDiff: async () => diff,
+    commit: async () => ({ ok: true, commit: 'abc1234', committed: 1 }),
+    revertFile: async () => ({ ok: true }),
     createBranch: async () => ({ ok: false, reason: 'error', message: 'unused' }),
     checkout: async () => ({ ok: true, branch: 'x' }),
   } as unknown as GitPilotApi
@@ -82,9 +88,9 @@ describe('ChangesTabBody', () => {
     expect(screen.getByText('new.txt')).toBeDefined()
   })
 
-  it('shows the empty note when nothing changed', async () => {
+  it('shows the scope-aware empty note when nothing changed', async () => {
     renderTab(fakeApi({ ...summary, files: [], total: 0 }))
-    expect(await screen.findByText('This session has not changed any file yet')).toBeDefined()
+    expect(await screen.findByText('No uncommitted changes')).toBeDefined()
   })
 
   it('loads a diff when a row is expanded and re-fetches after refresh', async () => {
@@ -94,12 +100,12 @@ describe('ChangesTabBody', () => {
     fireEvent.click(await screen.findByText('a.txt'))
     await waitFor(() => expect(container.textContent).toContain('+two'))
     // Refresh clears the cache; the effect reloads the expanded row's diff.
-    fireEvent.click(screen.getByText('Refresh'))
+    fireEvent.click(screen.getByTitle('Refresh'))
     await waitFor(() => expect(container.textContent).toContain('+two'))
   })
 
-  it('renders nothing meaningful without a session or summary', async () => {
+  it('renders the no-data note when the scope has no data', async () => {
     const { container } = renderTab(fakeApi(undefined))
-    await waitFor(() => expect(container.textContent).toBe(''))
+    await waitFor(() => expect(container.textContent).toContain('No data yet'))
   })
 })

@@ -59,12 +59,16 @@ export function GitPilotGuide({ kind, title, useTabInfo, changes, sessionId, t }
   const { tab } = useTabInfo()
   const [state, setState] = useState<Stats>({ phase: 'loading' })
   const fingerprintRef = useRef<string | undefined>(undefined)
+  // The injected closure is rebuilt per parent render; reading it through a
+  // ref keeps the poll on the latest session data without re-subscribing.
+  const changesRef = useRef(changes)
+  changesRef.current = changes
   useEffect(() => {
     let stopped = false
     // Fingerprint of the last applied view: a poll that saw no movement never
     // touches state, so the card neither flickers nor rerenders on idle reads.
     const poll = (): void => {
-      void changes().then(view => {
+      void changesRef.current().then(view => {
         if (stopped) return
         const fingerprint = view === undefined
           ? undefined
@@ -79,14 +83,18 @@ export function GitPilotGuide({ kind, title, useTabInfo, changes, sessionId, t }
     poll()
     const timer = window.setInterval(poll, REFRESH_INTERVAL_MS)
     return () => { stopped = true; window.clearInterval(timer) }
-  }, [changes])
+  }, [])
   const line = state.phase === 'loading'
     ? t('guide.loading')
-    : state.view === undefined || state.view.repo === false
-      ? t('changes.noRepo')
-      : state.view.total === 0
-        ? t('changes.empty')
-        : t('changes.summary', { files: state.view.total, added: state.view.added, deleted: state.view.deleted })
+    // `undefined` means "no data yet" (git unavailable, baseline pending) — a
+    // different fact from "this is not a repository".
+    : state.view === undefined
+      ? t('changes.noData')
+      : state.view.repo === false
+        ? t('changes.noRepo')
+        : state.view.total === 0
+          ? t('changes.empty')
+          : t('changes.summary', { files: state.view.total, added: state.view.added, deleted: state.view.deleted })
   return (
     <button
       type="button"

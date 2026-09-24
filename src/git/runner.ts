@@ -55,6 +55,12 @@ export interface GitRunOptions {
   signal: AbortSignal
   /** Per-command stdout cap, replacing the runner's `outputMaxBytes`. */
   maxBytes?: number
+  /**
+   * Extra environment layered over the runner's scrubbed base (the same
+   * explicit-layers merge the runtime subprocess service performs). Used for
+   * `GIT_INDEX_FILE` during baseline snapshots.
+   */
+  env?: Readonly<Record<string, string>>
 }
 
 /** Per-runner bounds. */
@@ -90,7 +96,13 @@ export class GitRunner {
       signal,
       // Prompting, config includes, and optional locks all become failures or
       // slowdowns in a headless context; keep every command deterministic.
-      env: { GIT_CONFIG_COUNT: '0', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' },
+      env: {
+        GIT_CONFIG_COUNT: '0',
+        GIT_TERMINAL_PROMPT: '0',
+        GIT_OPTIONAL_LOCKS: '0',
+        LC_ALL: 'C',
+        ...options.env,
+      },
     })
     const outcome = await handle.done
     if (signal.aborted) {

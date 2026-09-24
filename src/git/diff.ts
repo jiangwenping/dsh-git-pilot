@@ -1,5 +1,5 @@
-/** Baseline-to-worktree comparisons: numstat parsing, unified-diff parsing, and untracked line counts. */
-import { stat, readFile } from 'node:fs/promises'
+/** Baseline-to-worktree comparisons: numstat parsing and unified-diff parsing. */
+import { stat } from 'node:fs/promises'
 import type { GitRunner } from './runner.ts'
 import type { ChangedFileView, DiffHunkView, FileDiffView } from '../wire.ts'
 
@@ -36,14 +36,19 @@ export interface NumstatResult {
   truncated: boolean
 }
 
-/** Tracked working-tree changes against a baseline commit, keyed by path. */
+/**
+ * Line-count changes from `base` to the current worktree — or, when `tree` is
+ * given (a materialized worktree tree), from `base` to that tree, which lets
+ * untracked files participate in the comparison.
+ */
 export async function trackedNumstat(
   git: GitRunner,
   cwd: string,
   base: string,
+  tree: string | undefined,
   signal: AbortSignal,
 ): Promise<NumstatResult> {
-  const result = await git.run(['diff', '--numstat', '-z', '--no-renames', base], { cwd, signal })
+  const result = await git.run(['diff', '--numstat', '-z', '--no-renames', base, ...(tree === undefined ? [] : [tree])], { cwd, signal })
   if (result.exitCode !== 0) throw new Error(`git diff --numstat failed: ${result.stderr.trim()}`)
   const entries = new Map(parseNumstatZ(result.stdout).map(entry => [entry.path, entry]))
   return { entries, truncated: result.truncated }
@@ -81,91 +86,6 @@ export function parseUnifiedDiff(text: string): DiffHunkView[] {
     }
   }
   return hunks
-}
-
-/** File facts gathered without git, for untracked paths. */
-export interface UntrackedFacts {
-  lines: number
-  binary: boolean
-  oversized: boolean
-}
-
-/** Count the non-empty lines of an untracked file, honoring the byte cap. */
-export async function untrackedFacts(absolutePath: string, maxFileBytes: number): Promise<UntrackedFacts> {
-  let size: number
-  try {
-    size = (await stat(absolutePath)).size
-  } catch {
-    return { lines: 0, binary: false, oversized: true }
-  }
-  if (size > maxFileBytes) return { lines: 0, binary: false, oversized: true }
-  let buffer: Buffer
-  try {
-    buffer = await readFile(absolutePath)
-  } catch {
-    return { lines: 0, binary: false, oversized: true }
-  }
-  const probeEnd = Math.min(buffer.length, 8192)
-  let binary = false
-  for (let index = 0; index < probeEnd; index += 1) {
-    if (buffer[index] === 0) {
-      binary = true
-      break
-    }
-  }
-  if (binary) return { lines: 0, binary: true, oversized: false }
-  const lines = buffer.toString('utf8').split('\n').filter(line => line.trim() !== '').length
-  return { lines, binary: false, oversized: false }
-}
-
-/**
- * One file's baseline-to-worktree comparison.
- * @param absolutePath - the file's absolute path, for untracked reads.
- * @param untracked - when true, the file is new to git: its whole content is one added hunk.
- */
-export async function fileDiff(
-  git: GitRunner,
-  cwd: string,
-  base: string,
-  path: string,
-  opts: { absolutePath: string; maxFileBytes: number; untracked: boolean },
-  signal: AbortSignal,
-): Promise<FileDiffView> {
-  if (opts.untracked) {
-    const facts = await untrackedFacts(opts.absolutePath, opts.maxFileBytes)
-    if (facts.oversized) return { kind: 'oversized', path }
-    if (facts.binary) return { kind: 'binary', path }
-    let content = ''
-    try {
-      content = (await readFile(opts.absolutePath)).toString('utf8')
-    } catch {
-      return { kind: 'text', path, hunks: [] }
-    }
-    const lines = content.split('\n')
-    if (lines.at(-1) === '') lines.pop()
-    return {
-      kind: 'text',
-      path,
-      hunks: lines.length === 0 ? [] : [{
-        oldStart: 1,
-        oldLines: 0,
-        newStart: 1,
-        newLines: lines.length,
-        lines: lines.map(line => `+${line}`),
-      }],
-    }
-  }
-  if (opts.maxFileBytes > 0) {
-    try {
-      const { size } = await stat(opts.absolutePath)
-      if (size > opts.maxFileBytes) return { kind: 'oversized', path }
-    } catch {
-      // A deleted file has no worktree side; the diff still renders deletions.
-    }
-  }
-  const result = await git.run(['diff', '--unified=3', '--no-color', base, '--', path], { cwd, signal, maxBytes: 8 * 1024 * 1024 })
-  if (result.exitCode !== 0) throw new Error(`git diff failed: ${result.stderr.trim()}`)
-  return { kind: 'text', path, hunks: parseUnifiedDiff(result.stdout), ...(result.truncated ? { truncated: true as const } : {}) }
 }
 
 /** One `git diff --name-status` record: the change letter and its path. */

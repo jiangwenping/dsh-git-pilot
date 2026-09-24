@@ -9,17 +9,7 @@
  * Every route is POST, takes a plain JSON payload, and answers plain JSON:
  * `{ ok: true, value }` or `{ ok: false, error: { message } }`.
  */
-import { appendFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import type { CheckoutConfirm, GitPilotService } from './service.ts'
-
-/** Debug logger (temporary): mirrors registration state to the tmpdir. */
-function debugLog(message: string): void {
-  try {
-    appendFileSync(join(tmpdir(), 'dsh-git-pilot-debug.log'), `${new Date().toISOString()} ${message}\n`)
-  } catch { /* ignore */ }
-}
 
 /** Structural face of the connection service this plugin registers routes on. */
 export interface ConnectionFetchRegistry {
@@ -96,12 +86,10 @@ function route(
       }
     },
   })
-  debugLog(`route registered: ${path}`)
 }
 
 /** Register every plugin route on the connection service's fetch registry. */
 export function registerGitPilotFetchRoutes(connection: ConnectionFetchRegistry, service: GitPilotService): void {
-  debugLog('registerGitPilotFetchRoutes: registering 10 routes')
   // Read routes
   route(connection, `${READ_PREFIX}/status`, (payload, signal) => service.status(requiredString(payload, 'workspacePath'), signal))
   route(connection, `${READ_PREFIX}/branches`, (payload, signal) => service.branches(requiredString(payload, 'workspacePath'), signal))

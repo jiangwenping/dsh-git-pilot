@@ -8,10 +8,13 @@
  * work" — including edits made through Bash — and rewrite churn never
  * double-counts.
  */
+import { randomUUID } from 'node:crypto'
 import { isAbsolute, join, resolve } from 'node:path'
-import { realpathSync } from 'node:fs'
+import { realpathSync, rmSync } from 'node:fs'
+import { stat } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { GitRunner, resolveGitExecutable, type SubprocessLike } from './git/runner.ts'
-import { changedFileRow, fileDiff, parseNameStatusZ, trackedNumstat, untrackedFacts } from './git/diff.ts'
+import { changedFileRow, parseNameStatusZ, parseUnifiedDiff, trackedNumstat } from './git/diff.ts'
 import { repositoryStatus } from './git/status.ts'
 import { createBranch as gitCreateBranch, checkoutBranch as gitCheckout, listBranches as gitListBranches } from './git/branches.ts'
 import { commitChanges as gitCommit, revertFile as gitRevertFile } from './git/commit.ts'
@@ -53,6 +56,12 @@ export interface SessionBaseline {
   /** Commit object covering the worktree at capture; absent in an empty repository. */
   baseCommit?: string
   branch?: string
+  /**
+   * Private temp index (created OUTSIDE the worktree) seeded from the baseline
+   * commit; every comparison materializes the current worktree through it, so
+   * untracked files join the diff without the user's real index being touched.
+   */
+  indexFile?: string
   capturedAt: number
 }
 
@@ -119,6 +128,12 @@ export function isInsideWorkspace(workspace: string, candidate: string): boolean
   return candidate.startsWith(`${workspace}/`)
 }
 
+/**
+ * The well-known empty tree object: the comparison root for baselines of
+ * repositories with no commits yet (everything untracked is an addition).
+ */
+const EMPTY_TREE_HASH = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+
 /** A revision operand must never be mistaken for a git option. */
 function isSafeRevision(rev: string): boolean {
   return rev !== '' && !rev.startsWith('-') && !/\s/.test(rev) && rev.length <= 250
@@ -137,6 +152,38 @@ async function resolveToplevel(git: GitRunner, cwd: string, signal: AbortSignal)
   const inside = await git.run(['rev-parse', '--is-inside-work-tree', '--show-toplevel'], { cwd, signal })
   if (inside.exitCode !== 0 || !inside.stdout.startsWith('true')) return undefined
   return canonicalizePath(inside.stdout.split('\n')[1]?.trim() ?? cwd)
+}
+
+/**
+ * Snapshot the whole worktree — tracked modifications and untracked files,
+ * ignored files still excluded — into a commit object through a private temp
+ * index. The user's real index is never touched, and the temp index lives
+ * outside the worktree so `add -A` cannot pick it up. Returns '' when the
+ * tree matches HEAD (a clean tree needs no snapshot) or when any step fails;
+ * callers fall back to `stash create` and HEAD.
+ */
+async function snapshotWorktree(git: GitRunner, toplevel: string, indexFile: string, signal: AbortSignal): Promise<string> {
+  const head = await git.run(['rev-parse', '--verify', 'HEAD'], { cwd: toplevel, signal })
+  const hasHead = head.exitCode === 0
+  const headHash = hasHead ? head.stdout.trim() : ''
+  let headTreeHash = ''
+  if (hasHead) {
+    const headTree = await git.run(['rev-parse', 'HEAD^{tree}'], { cwd: toplevel, signal })
+    headTreeHash = headTree.exitCode === 0 ? headTree.stdout.trim() : ''
+  }
+  const seeded = await git.run(hasHead ? ['read-tree', headHash] : ['read-tree', '--empty'], { cwd: toplevel, signal, env: { GIT_INDEX_FILE: indexFile } })
+  if (seeded.exitCode !== 0) return ''
+  const add = await git.run(['add', '-A'], { cwd: toplevel, signal, env: { GIT_INDEX_FILE: indexFile } })
+  if (add.exitCode !== 0) return ''
+  const tree = await git.run(['write-tree'], { cwd: toplevel, signal, env: { GIT_INDEX_FILE: indexFile } })
+  if (tree.exitCode !== 0) return ''
+  const worktreeTree = tree.stdout.trim()
+  // A worktree identical to HEAD needs no snapshot commit — HEAD is the baseline.
+  if (worktreeTree === headTreeHash) return ''
+  const parent = hasHead ? ['-p', headHash] : []
+  const commit = await git.run(['commit-tree', worktreeTree, ...parent, '-m', 'dsh-git-pilot session baseline'], { cwd: toplevel, signal, env: { GIT_INDEX_FILE: indexFile } })
+  if (commit.exitCode !== 0) return ''
+  return commit.stdout.trim()
 }
 
 /** Create the service. Git resolution is lazy and shared; failures degrade to `null`. */
@@ -187,6 +234,11 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
     })()
   }
 
+  /** Release a baseline's artifacts: the anchor ref is git-side, the private index is a tmpdir file. */
+  const dropBaselineFiles = (baseline: SessionBaseline | undefined): void => {
+    if (baseline?.indexFile !== undefined) rmSync(baseline.indexFile, { force: true })
+  }
+
   /** Drop every baseline (and its anchor ref) whose working directory is the workspace or inside it. */
   const resetBaselinesForWorkspace = async (workspace: string): Promise<void> => {
     for (const [sessionId, baseline] of [...baselines]) {
@@ -195,6 +247,7 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
         if (captured !== undefined && isInsideWorkspace(workspace, captured.cwd)) {
           baselines.delete(sessionId)
           dropBaselineRef(sessionId, captured.cwd)
+          dropBaselineFiles(captured)
         }
       } catch {
         baselines.delete(sessionId)
@@ -212,11 +265,17 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
     // Paths in status/diff output are repo-root-relative no matter which
     // subdirectory the session was opened in; anchor every repo command there.
     const toplevel = canonicalizePath(inside.stdout.split('\n')[1]?.trim() ?? cwd)
-    // `git stash create` records the tracked worktree+index state as a commit
-    // object without touching the stash ref, the index, or the worktree; an
-    // all-clean tree answers empty and we fall back to HEAD.
-    const stash = await git.run(['stash', 'create'], { cwd: toplevel, signal })
-    let baseCommit = stash.exitCode === 0 ? stash.stdout.trim() : ''
+    // Baseline = a full snapshot of the worktree INCLUDING untracked files, so
+    // untracked files that predate the session are baseline content, not
+    // session additions (R5-1). `git stash create` cannot include untracked
+    // work (its flags parse as the message), so the snapshot runs through a
+    // private temp index; '' = nothing beyond HEAD, and HEAD is the baseline.
+    const indexFile = join(tmpdir(), `dsh-git-pilot-index-${randomUUID()}`)
+    let baseCommit = await snapshotWorktree(git, toplevel, indexFile, signal)
+    if (baseCommit === '') {
+      const stash = await git.run(['stash', 'create'], { cwd: toplevel, signal })
+      baseCommit = stash.exitCode === 0 ? stash.stdout.trim() : ''
+    }
     const branchProbe = await git.run(['branch', '--show-current'], { cwd: toplevel, signal })
     if (baseCommit === '') {
       const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
@@ -232,6 +291,7 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       isRepo: true,
       ...(baseCommit === '' ? {} : { baseCommit }),
       ...(branchProbe.exitCode === 0 && branchProbe.stdout.trim() !== '' ? { branch: branchProbe.stdout.trim() } : {}),
+      indexFile,
       capturedAt: Date.now(),
     }
   }
@@ -258,11 +318,21 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
 
   const ensureBaseline = async (sessionId: string, workspacePath: string | undefined, signal?: AbortSignal): Promise<SessionBaseline | undefined> => {
     const existing = baselines.get(sessionId)
-    if (existing !== undefined) return existing
+    if (existing !== undefined) {
+      // True LRU, not FIFO: a hit re-queues the entry so an active old session
+      // is never evicted by newer ones (its summary would silently reset).
+      baselines.delete(sessionId)
+      baselines.set(sessionId, existing)
+      return existing
+    }
     if (workspacePath === undefined || workspacePath === '') return undefined
-    // Baselines of unknown directories are a read-channel DoS surface: only
-    // registered workspaces (or agent-registry cwds) may establish one.
-    if (workspacePath !== undefined && !isRegisteredWorkspace(canonicalizePath(workspacePath)) && agents()?.get(sessionId) === undefined) return undefined
+    // Baselines of unknown directories are a read-channel DoS surface: a path
+    // must be a registered workspace or the session's own recorded cwd — the
+    // mere existence of the session does not vouch for an arbitrary directory.
+    const agentCwd = agents()?.get(sessionId)?.session?.header?.cwd
+    const pathAllowed = isRegisteredWorkspace(canonicalizePath(workspacePath))
+      || (agentCwd !== undefined && canonicalizePath(agentCwd) === canonicalizePath(workspacePath))
+    if (!pathAllowed) return undefined
     const effectiveSignal = signal ?? lifetime.signal
     // A previous run's anchor wins over a fresh capture: the session's work
     // from before a host restart stays in its summary.
@@ -285,7 +355,9 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
     while (baselines.size >= maxBaselines) {
       const oldest = baselines.keys().next().value
       if (oldest === undefined) break
+      const evicted = baselines.get(oldest)
       baselines.delete(oldest)
+      void evicted?.then(baseline => dropBaselineFiles(baseline)).catch(() => undefined)
     }
     baselines.set(sessionId, captured)
     return captured
@@ -304,6 +376,7 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       if (!/bad object|unusable repository/i.test(message)) throw error
       baselines.delete(sessionId)
       dropBaselineRef(sessionId, baseline.cwd)
+      dropBaselineFiles(baseline)
       log(`dsh-git-pilot: baseline lost for ${sessionId}; re-capturing (${message})`)
       const recaptured = await captureBaseline(sessionId, baseline.cwd, lifetime.signal)
       if (!recaptured.isRepo) throw error
@@ -358,6 +431,8 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       const localProbe = await git.run(['show-ref', '--verify', '--quiet', `refs/heads/${name}`], { cwd: normalized, signal })
       const remoteProbe = localProbe.exitCode !== 0
         ? await git.run(['rev-parse', '--verify', '--quiet', `refs/remotes/${name}`], { cwd: normalized, signal })
+        // Not probed: the local hit already answered. The literal 1 reads as
+        // "probe failed" at the checks below.
         : { exitCode: 1 }
       const isLocal = localProbe.exitCode === 0
       const isRemote = !isLocal && remoteProbe.exitCode === 0
@@ -366,6 +441,19 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       }
       // The protected guard looks at the branch that will end up checked out.
       const guardName = isRemote ? (name.includes('/') ? name.split('/').slice(1).join('/') : name) : name
+      if (isRemote) {
+        // `origin/HEAD` resolves as a symbolic ref but is not a switchable
+        // branch name.
+        if (name === 'HEAD' || guardName === 'HEAD') {
+          return { ok: false, reason: 'invalid-name', message: `${name} 不是可切换的分支` }
+        }
+        // A local branch with the same name already exists: switching to the
+        // remote must not collide with `checkout -b` — offer the local twin.
+        const twin = await git.run(['show-ref', '--verify', '--quiet', `refs/heads/${guardName}`], { cwd: normalized, signal })
+        if (twin.exitCode === 0) {
+          return { ok: false, reason: 'exists', existingBranch: guardName, message: `本地分支 ${guardName} 已存在` }
+        }
+      }
       if (isProtectedBranch(guardName, deps.config.protectedBranches) && !confirm.has('protected')) {
         return { ok: false, reason: 'protected', message: `${guardName} 是受保护分支` }
       }
@@ -442,7 +530,7 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
         // Known non-repository: the tab renders the explanation instead of nothing.
         return { repo: false, files: [], total: 0, added: 0, deleted: 0, truncated: false }
       }
-      return withBaselineRecovery(sessionId, baseline, (b) => collectChanges(git, b, sessionId, signal), signal)
+      return withBaselineRecovery(sessionId, baseline, (b) => collectChanges(git, b, signal), signal)
     },
 
     async sessionFileDiff(sessionId, path, signal = lifetime.signal): Promise<FileDiffView | undefined> {
@@ -451,13 +539,17 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       const baseline = await sessionContext(sessionId, signal)
       if (baseline === undefined) return undefined
       if (!baseline.isRepo) return undefined
-      return withBaselineRecovery(sessionId, baseline, (b) => buildFileDiff(git, b, sessionId, path, signal), signal)
+      return withBaselineRecovery(sessionId, baseline, (b) => buildFileDiff(git, b, path, signal), signal)
     },
 
     async uncommittedChanges(workspacePath, signal = lifetime.signal): Promise<SessionChangesView | undefined> {
       const git = await runner()
       if (git === null) return undefined
-      const toplevel = await resolveToplevel(git, workspacePath, signal)
+      // Content-level reads are registry-gated like writes: the file list and
+      // per-file diffs of an arbitrary local directory must not leave through
+      // an authenticated page (R5-6).
+      const normalized = assertRegisteredWorkspace(workspacePath)
+      const toplevel = await resolveToplevel(git, normalized, signal)
       if (toplevel === undefined) return { repo: false, files: [], total: 0, added: 0, deleted: 0, truncated: false }
       const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
       const baseCommit = head.exitCode === 0 ? head.stdout.trim() : undefined
@@ -468,13 +560,14 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
         isRepo: true,
         ...(baseCommit === undefined || baseCommit === '' ? {} : { baseCommit }),
         capturedAt: Date.now(),
-      }, '', signal)
+      }, signal)
     },
 
     async uncommittedFileDiff(workspacePath, path, signal = lifetime.signal): Promise<FileDiffView | undefined> {
       const git = await runner()
       if (git === null) return undefined
-      const toplevel = await resolveToplevel(git, workspacePath, signal)
+      const normalized = assertRegisteredWorkspace(workspacePath)
+      const toplevel = await resolveToplevel(git, normalized, signal)
       if (toplevel === undefined) return undefined
       const head = await git.run(['rev-parse', 'HEAD'], { cwd: toplevel, signal })
       const baseCommit = head.exitCode === 0 ? head.stdout.trim() : undefined
@@ -483,7 +576,7 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
         isRepo: true,
         ...(baseCommit === undefined || baseCommit === '' ? {} : { baseCommit }),
         capturedAt: Date.now(),
-      }, '', path, signal)
+      }, path, signal)
     },
 
     forgetSession(sessionId): void {
@@ -491,37 +584,59 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       baselines.delete(sessionId)
       void (async () => {
         const captured = await pending?.catch(() => undefined)
-        if (captured?.isRepo === true) dropBaselineRef(sessionId, captured.cwd)
+        if (captured === undefined) return
+        if (captured.isRepo === true) dropBaselineRef(sessionId, captured.cwd)
+        dropBaselineFiles(captured)
       })()
     },
 
     dispose(): void {
       lifetime.abort()
+      for (const [, pending] of baselines) {
+        void pending.then(captured => dropBaselineFiles(captured)).catch(() => undefined)
+      }
       baselines.clear()
     },
   }
 
-  /** The per-turn comparison for one live baseline. */
-  async function collectChanges(git: GitRunner, baseline: SessionBaseline, sessionId: string, signal: AbortSignal): Promise<SessionChangesView> {
+  /** Materialize the current worktree as a tree through the session's private index. */
+  const worktreeTree = async (git: GitRunner, baseline: SessionBaseline, signal: AbortSignal): Promise<string | undefined> => {
+    if (baseline.indexFile === undefined) return undefined
+    const seed = baseline.baseCommit === undefined ? ['read-tree', '--empty'] : ['read-tree', baseline.baseCommit]
+    const read = await git.run(seed, { cwd: baseline.cwd, signal, env: { GIT_INDEX_FILE: baseline.indexFile } })
+    if (read.exitCode !== 0) return undefined
+    const add = await git.run(['add', '-A'], { cwd: baseline.cwd, signal, env: { GIT_INDEX_FILE: baseline.indexFile } })
+    if (add.exitCode !== 0) return undefined
+    const write = await git.run(['write-tree'], { cwd: baseline.cwd, signal, env: { GIT_INDEX_FILE: baseline.indexFile } })
+    if (write.exitCode !== 0) return undefined
+    return write.stdout.trim()
+  }
+
+  /**
+   * The per-turn comparison for one live baseline: the baseline tree vs the
+   * worktree tree materialized through the session's private index. Comparing
+   * tree against tree lets untracked files join the diff with exact numstat
+   * counts (pre-session untracked files are baseline content, so only real
+   * session work appears), with no per-file reads beyond git's own.
+   */
+  async function collectChanges(git: GitRunner, baseline: SessionBaseline, signal: AbortSignal): Promise<SessionChangesView | undefined> {
     const base = baseline.baseCommit
-    const statusResult = await git.run(['status', '--porcelain=v2', '-z', '--no-renames', '--untracked-files=all', '--ignore-submodules=dirty'], { cwd: baseline.cwd, signal })
+    const tree = await worktreeTree(git, baseline, signal)
+    if (tree === undefined) return undefined
+    const from = base ?? EMPTY_TREE_HASH
+    const statusResult = await git.run(['status', '--porcelain=v2', '-z', '--no-renames', '--ignore-submodules=dirty'], { cwd: baseline.cwd, signal })
     if (statusResult.exitCode !== 0) throw new Error(`git status failed: ${statusResult.stderr.trim()}`)
     const statusEntries = parseStatusEntriesZ(statusResult.stdout)
-    const untrackedPaths = statusEntries.filter(entry => 'untracked' in entry).map(entry => entry.path)
     const unmergedPaths = new Set(statusEntries.filter(entry => 'unmerged' in entry).map(entry => entry.path))
     const tracked = new Map<string, 'modified' | 'added' | 'deleted' | 'unmerged'>()
-    let numstat = new Map<string, { added: number | null; deleted: number | null; path: string }>()
-    let numstatTruncated = false
-    if (base !== undefined) {
-      const nameStatus = await git.run(['diff', '--name-status', '-z', '--no-renames', '--ignore-submodules=dirty', base], { cwd: baseline.cwd, signal })
-      if (nameStatus.exitCode !== 0) throw new Error(`git diff --name-status failed: ${nameStatus.stderr.trim()}`)
-      for (const entry of parseNameStatusZ(nameStatus.stdout)) {
-        tracked.set(entry.path, entry.letter === 'A' ? 'added' : entry.letter === 'D' ? 'deleted' : entry.letter === 'U' || unmergedPaths.has(entry.path) ? 'unmerged' : 'modified')
-      }
-      const counted = await trackedNumstat(git, baseline.cwd, base, signal)
-      numstat = counted.entries
-      numstatTruncated = counted.truncated
+    const nameStatus = await git.run(['diff', '--name-status', '-z', '--no-renames', '--ignore-submodules=dirty', from, tree], { cwd: baseline.cwd, signal })
+    if (nameStatus.exitCode !== 0) throw new Error(`git diff --name-status failed: ${nameStatus.stderr.trim()}`)
+    for (const entry of parseNameStatusZ(nameStatus.stdout)) {
+      tracked.set(entry.path, entry.letter === 'A' ? 'added' : entry.letter === 'D' ? 'deleted' : entry.letter === 'U' || unmergedPaths.has(entry.path) ? 'unmerged' : 'modified')
     }
+    const counted = await trackedNumstat(git, baseline.cwd, from, tree, signal)
+    const numstat = counted.entries
+    const numstatTruncated = counted.truncated
     const branchProbe = await git.run(['branch', '--show-current'], { cwd: baseline.cwd, signal })
     const branch = branchProbe.exitCode === 0 ? branchProbe.stdout.trim() : ''
 
@@ -532,32 +647,23 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
       if (gitlinkPaths(statusEntries, path)) rows.push({ path, status, added: 0, deleted: 0, gitlink: true })
       else rows.push(changedFileRow(path, status, numstat.get(path)))
     }
-    for (const path of untrackedPaths) {
-      if (tracked.has(path)) continue
-      rows.push({ path, status: 'untracked', added: 0, deleted: 0 })
-    }
     rows.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
 
+    // numstat covers every row (tree diff needs no per-file reads), so the
+    // totals stay complete even when the list hits its cap.
     const files: ChangedFileView[] = []
     let added = 0
     let deleted = 0
     let truncated = numstatTruncated
     const cap = Math.max(0, deps.config.maxFiles)
     for (const row of rows) {
-      if (row.status === 'untracked' && row.added === 0 && row.deleted === 0 && row.binary !== true && row.oversized !== true) {
-        const facts = await untrackedFacts(join(baseline.cwd, row.path), deps.config.maxFileBytes)
-        if (facts.oversized) row.oversized = true
-        else if (facts.binary) row.binary = true
-        else row.added = facts.lines
-      }
-      // Totals stay complete even when the list hits its cap.
       added += row.added
       deleted += row.deleted
       if (files.length < cap) files.push(row)
       else truncated = true
     }
     return {
-      ...(baseline.baseCommit === undefined ? {} : { baseline: baseline.baseCommit.slice(0, 7) }),
+      ...(base === undefined ? {} : { baseline: base.slice(0, 7) }),
       ...(branch === '' ? { detached: true as const } : { branch }),
       files,
       total: rows.length,
@@ -567,23 +673,28 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
     }
   }
 
-  /** Build one file's comparison from the baseline's toplevel. */
-  async function buildFileDiff(git: GitRunner, baseline: SessionBaseline, sessionId: string, path: string, signal: AbortSignal): Promise<FileDiffView | undefined> {
+  /** One file's baseline-to-worktree comparison through the worktree tree. */
+  async function buildFileDiff(git: GitRunner, baseline: SessionBaseline, path: string, signal: AbortSignal): Promise<FileDiffView | undefined> {
     const base = baseline.baseCommit
-    const statusResult = await git.run(['status', '--porcelain=v2', '-z', '--no-renames', '--untracked-files=all', '--ignore-submodules=dirty'], { cwd: baseline.cwd, signal })
-    if (statusResult.exitCode !== 0) return undefined
-    const untracked = parseStatusEntriesZ(statusResult.stdout)
-      .some(entry => 'untracked' in entry && entry.path === path)
-    if (!untracked && base !== undefined) {
-      const numstat = await trackedNumstat(git, baseline.cwd, base, signal)
-      if (!numstat.entries.has(path)) return undefined
+    const tree = baseline.indexFile === undefined ? undefined : await worktreeTree(git, baseline, signal)
+    if (tree === undefined) return undefined
+    const from = base ?? EMPTY_TREE_HASH
+    const counted = await trackedNumstat(git, baseline.cwd, from, tree, signal)
+    const entry = counted.entries.get(path)
+    if (entry === undefined) return undefined
+    const absolutePath = join(baseline.cwd, path)
+    if (entry.added === null && entry.deleted === null) return { kind: 'binary', path }
+    if (deps.config.maxFileBytes > 0) {
+      try {
+        const { size } = await stat(absolutePath)
+        if (size > deps.config.maxFileBytes) return { kind: 'oversized', path }
+      } catch {
+        // A deleted file has no worktree side; the diff still renders deletions.
+      }
     }
-    if (!untracked && base === undefined) return undefined
-    return fileDiff(git, baseline.cwd, base ?? 'HEAD', path, {
-      absolutePath: join(baseline.cwd, path),
-      maxFileBytes: deps.config.maxFileBytes,
-      untracked,
-    }, signal)
+    const result = await git.run(['diff', '--unified=3', '--no-color', from, tree, '--', path], { cwd: baseline.cwd, signal, maxBytes: 8 * 1024 * 1024 })
+    if (result.exitCode !== 0) throw new Error(`git diff failed: ${result.stderr.trim()}`)
+    return { kind: 'text', path, hunks: parseUnifiedDiff(result.stdout), ...(result.truncated ? { truncated: true as const } : {}) }
   }
 
   return service

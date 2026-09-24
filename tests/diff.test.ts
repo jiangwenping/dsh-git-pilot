@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { changedFileRow, parseNumstatZ, parseUnifiedDiff, untrackedFacts } from '../src/git/diff.ts'
+import { changedFileRow, parseNumstatZ, parseUnifiedDiff } from '../src/git/diff.ts'
 
 describe('parseNumstatZ', () => {
   it('parses counts and paths, including tabs inside paths', () => {
@@ -71,45 +71,6 @@ describe('parseUnifiedDiff', () => {
   it('tolerates abbreviated header forms', () => {
     const hunks = parseUnifiedDiff('@@ -3 +3 @@\n-x\n+x')
     expect(hunks[0]).toMatchObject({ oldStart: 3, oldLines: 1, newStart: 3, newLines: 1 })
-  })
-})
-
-describe('untrackedFacts', () => {
-  it('counts non-empty lines', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-git-pilot-facts-'))
-    try {
-      const file = join(dir, 'new.txt')
-      await writeFile(file, 'a\n\n  \nb\n')
-      const facts = await untrackedFacts(file, 1024)
-      expect(facts).toEqual({ lines: 2, binary: false, oversized: false })
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('flags binary content by NUL probe', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-git-pilot-facts-'))
-    try {
-      const file = join(dir, 'blob.bin')
-      await writeFile(file, Buffer.from([0x61, 0x00, 0x62]))
-      const facts = await untrackedFacts(file, 1024)
-      expect(facts.binary).toBe(true)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
-  })
-
-  it('flags oversized files without reading them', async () => {
-    const dir = await mkdtemp(join(tmpdir(), 'dsh-git-pilot-facts-'))
-    try {
-      const file = join(dir, 'big.txt')
-      await writeFile(file, 'x'.repeat(64))
-      const facts = await untrackedFacts(file, 8)
-      expect(facts.oversized).toBe(true)
-      expect(facts.lines).toBe(0)
-    } finally {
-      await rm(dir, { recursive: true, force: true })
-    }
   })
 })
 

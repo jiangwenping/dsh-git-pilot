@@ -65,13 +65,10 @@ interface GitPilotClientContext {
  */
 export function apply(rawContext: unknown): void {
   const ctx = rawContext as GitPilotClientContext
-  console.info('[dsh-git-pilot] client apply entered')
   const slots = ctx.slots
   const locale = ctx.locale
-  if (slots === undefined || locale === undefined) {
-    console.warn('[dsh-git-pilot] missing slots/locale service, client half inert')
-    return
-  }
+  if (slots === undefined || locale === undefined) return
+
 
   const api = new GitPilotApi()
   const openChanges = ctx.sidebarRight === undefined
@@ -100,11 +97,11 @@ export function apply(rawContext: unknown): void {
   let disposed = false
   ctx.effect(() => () => { disposed = true }, 'dsh-git-pilot: dispose flag')
   void api.uiOptions().then(options => {
-    if (disposed) return
-    console.info('[dsh-git-pilot] uiOptions resolved', JSON.stringify(options))
+    // Fail closed: an unreadable Host config must not mount surfaces the Host
+    // may have switched off (the old all-on fallback contradicted it).
+    if (disposed || options === undefined) return
     // The right-Sidebar Changes tab: stage one (the type) and stage two (the body).
     const hasSidebar = ctx.sidebarRightTabs !== undefined && ctx.sidebarRight !== undefined
-    console.info('[dsh-git-pilot] sidebar faces', hasSidebar)
     if (options.changesPanel && hasSidebar) {
       const t = locale.bind(NS)
       const tabDefinition = changesTabDefinition(t)
@@ -124,7 +121,6 @@ export function apply(rawContext: unknown): void {
         },
         GitPilotGuide,
       )), 'dsh-git-pilot: guide entry')
-      console.info('[dsh-git-pilot] changes tab registered')
     }
 
     // The branch control: a Cursor-style row under the composer card and a
@@ -133,6 +129,7 @@ export function apply(rawContext: unknown): void {
     const rowInject = (sessionId: unknown): BranchControlInject => ({
       api,
       cwd: cwdOf(sessionId),
+      workspaceTitle: titleOf(sessionId),
       ...(openChanges === undefined ? {} : { onOpenChanges: openChanges }),
       variant: 'row',
     })
@@ -153,7 +150,6 @@ export function apply(rawContext: unknown): void {
         { name: 'conversation.input.left', id: 'git-pilot.chip', order: 20, locale: NS, inject: chipInject },
         BranchControl,
       )), 'dsh-git-pilot: composer chip')
-      console.info('[dsh-git-pilot] chip registered')
     }
   }).catch(reason => { console.error('[dsh-git-pilot] registration failed:', reason) })
 }

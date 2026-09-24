@@ -40,15 +40,9 @@ export class GitPilotApi {
     return call('read', 'branches', { workspacePath })
   }
 
-  uiOptions(): Promise<GitPilotUiOptions> {
-    return call<GitPilotUiOptions>('read', 'ui-options', {}).catch(() => ({
-      remoteBranches: false,
-      branchNameTemplate: 'feature/YYYYMMDD-',
-      autoOpenChanges: 'firstTurn' as const,
-      changesPanel: true,
-      branchChip: true,
-      composerBranchRow: true,
-    }))
+  /** `undefined` when the Host config could not be read; callers fail closed. */
+  uiOptions(): Promise<GitPilotUiOptions | undefined> {
+    return call<GitPilotUiOptions>('read', 'ui-options', {}).catch(() => undefined)
   }
 
   ensureBaseline(sessionId: string, workspacePath?: string): Promise<unknown> {

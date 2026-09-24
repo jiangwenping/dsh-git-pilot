@@ -1,33 +1,8 @@
 /**
- * Types and channel names shared by the Host and browser halves. Everything
- * here crosses the connection-RPC boundary as plain JSON, so both halves may
- * keep structural, version-tolerant views of it.
+ * Wire views shared by the Host and browser halves. Everything here crosses
+ * the `/api/git-pilot/*` fetch routes as plain JSON, so both halves keep
+ * structural, version-tolerant views of it.
  */
-
-/**
- * Channel names MUST match the runtime's `/^\/[A-Za-z0-9._~-]+$/` (absolute,
- * no colon) — `connection.assertChannel` throws otherwise and the host half
- * dies at registration. Colons are explicitly not allowed.
- */
-
-/** Read channel: never mutates the repository. */
-export const GIT_PILOT_READ_CHANNEL = '/git-pilot-read'
-/** Write channel: branch creation and checkout, user-initiated only. */
-export const GIT_PILOT_WRITE_CHANNEL = '/git-pilot-write'
-
-/** One RPC answer; mirrors the connection transport's own result shape. */
-export interface GitPilotRpcResult<T = unknown> {
-  ok: boolean
-  value?: T
-  error?: { code?: string; message: string; details?: Record<string, unknown> }
-}
-
-/** Minimal connection face the browser half needs. */
-export interface GitPilotClientConnection {
-  rpc: {
-    call(channel: string, endpoint: string, payload: unknown): Promise<GitPilotRpcResult>
-  }
-}
 
 /** Working-tree standing of one workspace, as the composer chips show it. */
 export interface GitStatusView {

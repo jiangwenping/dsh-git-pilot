@@ -16,9 +16,7 @@ export type GitPilotKey =
   | 'menu.protectedConfirm'
   | 'menu.cancel'
   | 'menu.working'
-  | 'menu.local'
   | 'menu.remote'
-  | 'menu.error'
   | 'changes.tabTitle'
   | 'changes.onBranch'
   | 'changes.onDetached'
@@ -39,16 +37,16 @@ export type GitPilotKey =
   | 'changes.status.unmerged'
   | 'changes.status.untracked'
   | 'changes.loadFailed'
-  | 'changes.retry'
   | 'guide.description'
   | 'guide.loading'
   | 'scope.uncommitted'
   | 'scope.session'
+  | 'changes.noData'
+  | 'changes.emptyUncommitted'
   | 'commit.action'
   | 'commit.placeholder'
   | 'commit.confirm'
   | 'commit.working'
-  | 'commit.selected'
   | 'commit.nothing'
   | 'commit.failed'
   | 'revert.action'
@@ -75,9 +73,7 @@ export const zh: Record<GitPilotKey, string> = {
   'menu.protectedConfirm': '{name} 是受保护分支，通常不应直接切换。仍要继续吗？',
   'menu.cancel': '取消',
   'menu.working': '处理中…',
-  'menu.local': '本地分支',
   'menu.remote': '远程分支',
-  'menu.error': '操作失败',
   'changes.tabTitle': '变更',
   'changes.onBranch': '分支 {branch}',
   'changes.onDetached': '分离 HEAD',
@@ -98,14 +94,14 @@ export const zh: Record<GitPilotKey, string> = {
   'changes.status.unmerged': '冲突',
   'changes.status.untracked': '未跟踪',
   'changes.loadFailed': '加载失败',
-  'changes.retry': '重试',
+  'changes.noData': '暂无数据',
+  'changes.emptyUncommitted': '工作区没有未提交的改动',
   'guide.description': '查看本会话改动的文件与行数',
   'guide.loading': '统计中…',
   'commit.action': '提交',
   'commit.placeholder': '提交信息…',
   'commit.confirm': '确认提交',
   'commit.working': '提交中…',
-  'commit.selected': '已选 {count}/{total} 个文件',
   'commit.nothing': '没有可提交的改动',
   'commit.failed': '提交失败',
   'revert.action': '恢复',
@@ -135,9 +131,7 @@ export const en: Record<GitPilotKey, string> = {
   'menu.protectedConfirm': '{name} is a protected branch and is usually not switched to directly. Continue?',
   'menu.cancel': 'Cancel',
   'menu.working': 'Working…',
-  'menu.local': 'Local branches',
   'menu.remote': 'Remote branches',
-  'menu.error': 'Operation failed',
   'changes.tabTitle': 'Changes',
   'changes.onBranch': 'On {branch}',
   'changes.onDetached': 'On detached HEAD',
@@ -158,14 +152,14 @@ export const en: Record<GitPilotKey, string> = {
   'changes.status.unmerged': 'unmerged',
   'changes.status.untracked': 'untracked',
   'changes.loadFailed': 'Failed to load',
-  'changes.retry': 'Retry',
+  'changes.noData': 'No data yet',
+  'changes.emptyUncommitted': 'No uncommitted changes',
   'guide.description': 'Files and lines this session changed',
   'guide.loading': 'Counting…',
   'commit.action': 'Commit',
   'commit.placeholder': 'Commit message…',
   'commit.confirm': 'Commit',
   'commit.working': 'Committing…',
-  'commit.selected': '{count}/{total} files selected',
   'commit.nothing': 'Nothing to commit',
   'commit.failed': 'Commit failed',
   'revert.action': 'Revert',

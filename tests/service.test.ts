@@ -33,6 +33,24 @@ async function seedRepo(): Promise<TempRepo> {
   return repo
 }
 
+describe('session baseline snapshot (R5-1)', () => {
+  it('treats pre-session untracked files as baseline, not session additions', async () => {
+    const repo = await seedRepo()
+    // Placed BEFORE the first baseline capture: previous behavior counted it
+    // as session work (+3 lines); the worktree snapshot puts it in the base.
+    await repo.write('scratch/old-work.txt', 'l1\nl2\nl3\n')
+    const agents = { list: () => [], get: () => ({ session: { header: { cwd: repo.root } } }) }
+    const svc = service({ repo, agents })
+    const view = await svc.sessionChanges('s-r51')
+    expect(view?.files.some(file => file.path === 'scratch/old-work.txt')).toBe(false)
+    // Work created after the baseline still shows up.
+    await repo.write('fresh.txt', 'brand new\n')
+    const after = await svc.sessionChanges('s-r51')
+    expect(after?.files.some(file => file.path === 'fresh.txt')).toBe(true)
+    await repo.dispose()
+  })
+})
+
 describe('isProtectedBranch', () => {
   it('matches exact names and trailing wildcards', () => {
     const patterns = ['master', 'main', 'release/*']
@@ -206,7 +224,8 @@ describe('session baselines and cumulative changes', () => {
       let changes = await pilot.sessionChanges('s1')
       expect(changes).toBeDefined()
       expect(changes?.total).toBe(2)
-      expect(changes?.added).toBe(1 + 4)
+      // Tree-diff numstat counts every line of an untracked file, tracked or not.
+      expect(changes?.added).toBe(1 + 5)
       expect(changes?.deleted).toBe(0)
       expect(changes?.branch).toBe('master')
 
@@ -362,7 +381,8 @@ describe('session baselines and cumulative changes', () => {
       const byPath = new Map(changes?.files.map(file => [file.path, file]))
       // Root-relative paths with real counts — not "oversized", not empty.
       expect(byPath.get('a.txt')).toMatchObject({ status: 'modified', added: 1 })
-      expect(byPath.get('sub/new.txt')).toMatchObject({ status: 'untracked', added: 2 })
+      // Tree-diff classifies new files through git's own name-status letter.
+      expect(byPath.get('sub/new.txt')).toMatchObject({ status: 'added', added: 2 })
       const diff = await pilot.sessionFileDiff('s1', 'a.txt')
       expect(diff?.kind).toBe('text')
     } finally {

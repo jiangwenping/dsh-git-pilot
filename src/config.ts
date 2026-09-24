@@ -3,6 +3,7 @@
  * Invalid values fail plugin load, mirroring the workspace-changes plugin.
  */
 import z from 'schemastery'
+import { DEFAULT_BRANCH_TEMPLATE } from './branch-template.ts'
 
 /** When the Changes tab opens by itself. */
 export type AutoOpenChanges = 'never' | 'firstTurn' | 'always'
@@ -49,6 +50,6 @@ export const Config = z.object({
   maxBranches: z.number().default(200),
   maxFiles: z.number().default(500),
   maxFileBytes: z.number().default(2 * 1024 * 1024),
-  branchNameTemplate: z.string().default('feature/YYYYMMDD-'),
+  branchNameTemplate: z.string().default(DEFAULT_BRANCH_TEMPLATE),
   protectedBranches: z.array(z.string()).default(['master', 'main', 'release/*']),
 }) as unknown as z<GitPilotConfig>

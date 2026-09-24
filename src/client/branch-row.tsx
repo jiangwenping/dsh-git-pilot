@@ -1,7 +1,7 @@
 /** The composer branch control: chip or row, with the search/create/confirm menu. */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { validateBranchName } from '../git/branches.ts'
-import { renderBranchTemplate } from '../branch-template.ts'
+import { DEFAULT_BRANCH_TEMPLATE, renderBranchTemplate } from '../branch-template.ts'
 import type { BranchListView, BranchMutationView, GitStatusView } from '../wire.ts'
 import type { GitPilotApi, GitPilotUiOptions } from './api.ts'
 import type { GitPilotKey } from './locales.ts'
@@ -174,9 +174,11 @@ export function BranchControl(props: BranchControlProps): ReactNode {
   const [confirming, setConfirming] = useState<ConfirmState | undefined>()
   const [options, setOptions] = useState<GitPilotUiOptions | undefined>()
   const autoOpenedRef = useRef(new Set<string>())
+  // Dirty-state memory keyed per session+workspace: a dirty→dirty switch
+  // between two workspaces must not suppress the 'always' auto-open.
+  const lastDirtyRef = useRef<Record<string, number>>({})
   const statusRequestRef = useRef(0)
   const branchesRequestRef = useRef(0)
-  const lastDirtyRef = useRef<number>(-1)
   const rootRef = useRef<HTMLSpanElement | null>(null)
 
   const refreshStatus = useCallback((path: string | undefined) => {
@@ -194,9 +196,18 @@ export function BranchControl(props: BranchControlProps): ReactNode {
   }, [api])
 
   // Standing + baseline: re-resolve when the workspace changes, and refresh on focus.
+  // A workspace/session switch invalidates everything the open menu shows:
+  // stale listings, in-flight loads, and leftover create/confirm/error state.
+  const cwdRef = useRef(cwd)
+  cwdRef.current = cwd
   useEffect(() => {
     setBranches(undefined)
     setConfirming(undefined)
+    setOpen(false)
+    setError(undefined)
+    setCreating(false)
+    setNameDraft('')
+    setFilter('')
     refreshStatus(cwd)
     if (cwd !== undefined && sessionId !== undefined) api.ensureBaseline(sessionId, cwd).catch(() => undefined)
   }, [api, cwd, sessionId, refreshStatus])
@@ -219,9 +230,10 @@ export function BranchControl(props: BranchControlProps): ReactNode {
     if (options === undefined) return
     if (!options.changesPanel) return
     if (status === undefined || !status.isRepo) return
+    const dirtyKey = `${String(sessionId ?? '')}@${cwd ?? ''}`
     const dirty = status.dirtyFiles > 0
-    const previous = lastDirtyRef.current
-    lastDirtyRef.current = dirty ? status.dirtyFiles : 0
+    const previous = lastDirtyRef.current[dirtyKey] ?? 0
+    lastDirtyRef.current = { ...lastDirtyRef.current, [dirtyKey]: dirty ? status.dirtyFiles : 0 }
     if (!dirty) return
     if (options.autoOpenChanges === 'never') return
     if (options.autoOpenChanges === 'always') {
@@ -258,6 +270,8 @@ export function BranchControl(props: BranchControlProps): ReactNode {
     api.branches(path)
       .then(list => {
         if (request !== branchesRequestRef.current) return
+        // A response from a workspace we already left must not fill the menu.
+        if (cwdRef.current !== path) return
         setBranches(list); setError(undefined)
       })
       .catch(reason => {
@@ -346,14 +360,14 @@ export function BranchControl(props: BranchControlProps): ReactNode {
 
   const current = branchDisplayName(status, t)
   if (current === undefined) return null
-  const template = renderBranchTemplate(options?.branchNameTemplate ?? 'feature/YYYYMMDD-')
+  const template = renderBranchTemplate(options?.branchNameTemplate ?? DEFAULT_BRANCH_TEMPLATE)
   const query = filter.trim().toLowerCase()
   const locals = (branches?.locals ?? []).filter(branch => query === '' || branch.name.toLowerCase().includes(query))
   const remotes = (branches?.remotes ?? []).filter(branch => query === '' || branch.name.toLowerCase().includes(query))
   const prefilledName = nameDraft !== '' ? nameDraft : (filter.trim() !== '' ? filter.trim() : template)
 
   const trigger = (
-    <button type="button" style={styles.trigger} onClick={openMenu} title={current} data-testid="git-pilot-branch-trigger">
+    <button type="button" style={styles.trigger} onClick={openMenu} title={current} data-testid="git-pilot-branch-trigger" aria-haspopup="menu" aria-expanded={open}>
       <span aria-hidden>⎇</span>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{current}</span>
       <span aria-hidden style={{ fontSize: 10, opacity: 0.7 }}>{open ? '▲' : '▼'}</span>
@@ -381,6 +395,7 @@ export function BranchControl(props: BranchControlProps): ReactNode {
             style={{ ...styles.badge, color: 'var(--dsw-alias-state-warn-primary, #e0a34a)' }}
             onClick={() => sessionId !== undefined && onOpenChanges(sessionId)}
             title={String(status.dirtyFiles)}
+            aria-label={`${t('changes.tabTitle')} ${status.dirtyFiles}`}
           >
             ±{status.dirtyFiles}
           </button>

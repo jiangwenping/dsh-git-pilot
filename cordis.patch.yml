@@ -7,6 +7,8 @@
       config:
         enabled: true
         branchChip: true
+        # Off by intent: the dock row duplicates the composer chip's branch
+        # entry; the chip also carries the dirty badge and Changes shortcut.
         composerBranchRow: false
         changesPanel: true
         autoOpenChanges: firstTurn

@@ -267,6 +267,16 @@ function HunkBody({ hunk }: { hunk: DiffHunkView }): ReactNode {
       {hunk.lines.map((line, index) => {
         const prefix = line.slice(0, 1)
         const paint = lineColor(prefix)
+        // A "\ No newline" marker belongs to the previous line: it renders
+        // as a note and must not advance either counter.
+        if (prefix === '\\') {
+          return (
+            <div key={index} style={{ ...styles.diffLine, ...styles.hunkHead }}>
+              <span style={styles.lineNo}>{' '}</span>
+              <span style={{ flex: 1 }}>{line}</span>
+            </div>
+          )
+        }
         const numbers = prefix === '+'
           ? `  ${newLine}`
           : prefix === '-'
@@ -288,13 +298,15 @@ function HunkBody({ hunk }: { hunk: DiffHunkView }): ReactNode {
 
 /** One file row: selection, counts, revert affordance, and its diff on expansion. */
 function FileRow({
-  file, expanded, diff, selected, revertState, onToggle, onSelect, onRevertAsk, onRevertConfirm, onRevertCancel, t,
+  file, expanded, diff, selected, revertState, revertBusy, onToggle, onSelect, onRevertAsk, onRevertConfirm, onRevertCancel, t,
 }: {
   file: ChangedFileView
   expanded: boolean
   diff: FileDiffView | 'loading' | 'failed' | undefined
   selected: boolean
   revertState: 'idle' | 'confirm' | 'working'
+  /** A revert is already running: every other revert button stands down. */
+  revertBusy: boolean
   onToggle: () => void
   onSelect: (selected: boolean) => void
   onRevertAsk: () => void
@@ -316,7 +328,18 @@ function FileRow({
           </span>
         )
   return (
-    <li style={styles.row} onClick={onToggle}>
+    <li
+      style={styles.row}
+      onClick={onToggle}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      onKeyDown={event => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onToggle()
+      }}
+    >
       <div style={styles.rowHead}>
         <span style={styles.fileIcon} aria-hidden>{fileGlyph(file.path)}</span>
         <span style={styles.path} title={file.path}>{file.path}</span>
@@ -328,6 +351,7 @@ function FileRow({
               type="button"
               style={styles.revert}
               title={t('revert.action')}
+              disabled={revertBusy}
               onClick={event => { event.stopPropagation(); onRevertAsk() }}
             >
               ↩
@@ -360,9 +384,9 @@ function FileRow({
         : null}
       {expanded
         ? (
-          <div style={styles.diff}>
+          <div style={styles.diff} onClick={event => event.stopPropagation()}>
             {diff === undefined || diff === 'loading'
-              ? <div style={styles.note}>{t('menu.working' as GitPilotKey)}</div>
+              ? <div style={styles.note}>{t('menu.working')}</div>
               : diff === 'failed'
                 ? <div style={styles.error}>{t('changes.loadFailed')}</div>
                 : diff.kind === 'binary'
@@ -396,6 +420,9 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
 
   const [summary, setSummary] = useState<SessionChangesView | undefined>()
   const [failed, setFailed] = useState(false)
+  // True after the first settle: distinguishes "still loading" from "loaded
+  // but the scope has no data" (different UI states).
+  const [loaded, setLoaded] = useState(false)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [diffs, setDiffs] = useState<Record<string, FileDiffView | 'loading' | 'failed'>>({})
   const [selected, setSelected] = useState<Record<string, boolean>>({})
@@ -418,6 +445,7 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
     const epoch = ++refreshEpochRef.current
     const settle = (view: SessionChangesView | undefined): void => {
       if (epoch !== refreshEpochRef.current) return
+      setLoaded(true)
       const fingerprint = view === undefined
         ? undefined
         : JSON.stringify([view.branch, view.detached, view.total, view.added, view.deleted, view.truncated, view.files.map(file => `${file.status}:${file.path}:${file.added}:${file.deleted}`)])
@@ -425,16 +453,22 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
       fingerprintRef.current = fingerprint
       setSummary(view); setFailed(false); setDiffs({})
     }
+    const failRows = (): void => {
+      if (epoch !== refreshEpochRef.current) return
+      setFailed(true)
+      // A failed refresh must not leave expanded rows stuck on "Working…".
+      setDiffs(previous => Object.fromEntries(Object.entries(previous).map(([key, value]) => [key, value === 'loading' ? 'failed' : value])))
+    }
     if (scope === 'uncommitted') {
       // Workspace scope needs no session; without a workspace the tab stays empty.
       if (cwd === undefined || cwd === '') return
-      api.uncommitted(cwd).then(settle).catch(() => { if (epoch === refreshEpochRef.current) setFailed(true) })
+      api.uncommitted(cwd).then(settle).catch(() => { if (epoch === refreshEpochRef.current) failRows() })
       return
     }
     if (sessionKey === '') return
     api.sessionChanges(sessionKey)
       .then(settle)
-      .catch(() => { if (epoch === refreshEpochRef.current) setFailed(true) })
+      .catch(() => { if (epoch === refreshEpochRef.current) failRows() })
   }, [api, sessionKey, scope, cwd])
 
   useEffect(() => {
@@ -443,6 +477,7 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
     setExpanded({})
     setDiffs({})
     setSelected({})
+    setLoaded(false)
     setCommitPhase('idle')
     setMessage('')
     setActionError(undefined)
@@ -478,7 +513,7 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
   useEffect(() => {
     if (!visible || sessionKey === '') return
     const onFocus = (): void => { refresh() }
-    const timer = window.setInterval(refresh, 30_000)
+    const timer = window.setInterval(() => { if (document.hidden) return; refresh() }, 30_000)
     window.addEventListener('focus', onFocus)
     return () => {
       window.clearInterval(timer)
@@ -491,7 +526,9 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
   }
 
   const doCommit = (): void => {
-    if (cwd === undefined || cwd === '' || summary === undefined || commitPhase === 'working') return
+    // Commit always writes the picked files' current worktree content — it is
+    // an uncommitted-scope action, whatever list the user launched it from.
+    if (scope !== 'uncommitted' || cwd === undefined || cwd === '' || summary === undefined || commitPhase === 'working') return
     const picked = summary.files.filter(file => selected[file.path] === true).map(file => file.path)
     const paths = picked.length > 0 ? picked : summary.files.map(file => file.path)
     setCommitPhase('working')
@@ -554,13 +591,15 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
   if (sessionKey === '' || summary === undefined) {
     return (
       <div style={styles.root}>
-        {failed ? <div style={styles.note}>{t('changes.loadFailed')}</div> : null}
+        {failed ? <div style={styles.note}>{t('changes.loadFailed')}</div> : loaded ? <div style={styles.note}>{t('changes.noData')}</div> : <div style={styles.note}>{t('menu.working')}</div>}
       </div>
     )
   }
   const branchLine = summary.detached === true ? t('changes.onDetached') : t('changes.onBranch', { branch: summary.branch ?? '' })
   const totals = t('changes.summary', { files: summary.total, added: summary.added, deleted: summary.deleted })
-  const repo = summary.repo !== false && (summary.branch !== undefined || summary.detached === true)
+  // collectChanges always answers branch or detached for a repository, so the
+  // presence marker alone decides.
+  const repo = summary.repo !== false
   return (
     <div style={styles.root}>
       {repo
@@ -580,7 +619,7 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
             <span style={styles.spring} />
             <button type="button" style={styles.ghost} onClick={() => setAll(anyCollapsed)}>{anyCollapsed ? t('changes.expandAll') : t('changes.collapseAll')}</button>
             <button type="button" style={styles.ghost} onClick={() => refresh({ force: true })} title={t('changes.refresh')}>⟳</button>
-            {cwd !== undefined && cwd !== '' && summary.files.length > 0 && commitPhase === 'idle'
+            {scope === 'uncommitted' && cwd !== undefined && cwd !== '' && summary.files.length > 0 && commitPhase === 'idle'
               ? (
                 <button type="button" style={styles.primaryButton} onClick={() => { setCommitPhase('input'); setActionError(undefined) }}>
                   {selectedCount > 0 ? `${t('commit.action')} ${selectedCount}/${summary.files.length}` : t('commit.action')}
@@ -594,7 +633,7 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
             <span style={styles.branchLine}>{t('changes.noRepo')}</span>
           </div>
         )}
-      {repo && cwd !== undefined && cwd !== '' && summary.files.length > 0 && (commitPhase === 'input' || commitPhase === 'working')
+      {scope === 'uncommitted' && repo && cwd !== undefined && cwd !== '' && summary.files.length > 0 && (commitPhase === 'input' || commitPhase === 'working')
         ? (
           <div style={styles.commitBar}>
             <input
@@ -622,17 +661,18 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
       {!repo
         ? <div style={styles.note}>{t('changes.noRepo')}</div>
         : summary.files.length === 0
-        ? <div style={styles.note}>{t('changes.empty')}</div>
+        ? <div style={styles.note}>{scope === 'uncommitted' ? t('changes.emptyUncommitted') : t('changes.empty')}</div>
         : (
           <ul style={styles.list}>
             {summary.files.map(file => (
               <FileRow
-                key={`${file.status}:${file.path}`}
+                key={file.path}
                 file={file}
                 expanded={expanded[file.path] === true}
                 diff={diffs[file.path]}
                 selected={selected[file.path] === true}
                 revertState={revertWorking && revertTarget === file.path ? 'working' : revertTarget === file.path ? 'confirm' : 'idle'}
+                revertBusy={revertWorking}
                 onToggle={() => toggle(file.path)}
                 onSelect={value => setSelected(previous => ({ ...previous, [file.path]: value }))}
                 onRevertAsk={() => setRevertTarget(file.path)}

@@ -46,25 +46,27 @@ Mutations ride the `/git-pilot-write` RPC channel and, when a workspace registry
 | `autoFetch` | `false` | `git fetch --prune` when the menu opens (network side effect). |
 | `timeoutMs` | `10000` | Per-command git timeout. |
 | `maxBranches` | `200` | Menu rows kept. |
-| `maxFiles` | `500` | Change rows kept (totals stay complete). |
+| `maxFiles` | `500` | Change rows kept; untracked line-count reads also stop at the cap, so rows and line totals cover the kept rows once it is hit (`truncated` marks it). |
 | `maxFileBytes` | `2MiB` | File read cap for counts/diffs. |
 | `branchNameTemplate` | `feature/YYYYMMDD-` | Create-branch prefill; `YYYY`/`MM`/`DD` expand. |
 | `protectedBranches` | `['master','main','release/*']` | Checkout-in guard patterns. |
 
 ## Understand the implementation
 
-- **Host half** (`lib/index.js`): provides the `gitPilot` service over `subprocess`; every git command runs with a timeout, scrubbed env (`GIT_TERMINAL_PROMPT=0`…), and bounded output; the macOS `/usr/bin/git` Xcode stub is probed like the workspace-changes plugin does.
-- **Baseline**: captured once per session (lazy, or at first UI mount). `git stash create` records the tracked worktree+index state as a commit object without touching the stash ref; an all-clean tree falls back to HEAD. Session changes = `git diff --name-status/--numstat <baseline>` for tracked paths plus untracked paths from `git status --porcelain=v2` (line counts via a capped read; DR-2: non-empty lines).
+- **Host half** (`lib/index.js`): provides the `gitPilot` service over `subprocess`; every git command runs with a timeout, a layered env (prompting/config-includes/optional-locks neutralized — parent `GIT_*` vars still merge through, as the runtime subprocess service specifies), and bounded output; the macOS `/usr/bin/git` Xcode stub is probed like the workspace-changes plugin does.
+- **Baseline**: captured once per session (lazy, at first UI mount, or recovered from the session's `refs/git-pilot/<session>` anchor after a host restart). The anchor pins a full worktree snapshot — tracked changes AND untracked files (ignored files stay excluded) — built through a private temp index (`read-tree HEAD` + `add -A` + `write-tree` + `commit-tree`) so pre-session untracked files are baseline content, not session additions; failures fall back to `git stash create`, then HEAD. Session changes = `git diff --name-status/--numstat <baseline>` for tracked paths plus untracked paths from `git status --porcelain=v2` (line counts via a capped read that stops at `maxFiles`; DR-2: non-empty lines).
 - **Browser half** (`lib/client.js`): registers into the shipped seats only — `conversation.composer.dock`, `conversation.input.left`, and a keyed `sidebar.right.pane.tab` type (`dsh-resource://git-pilot-changes/session/<id>`). Copy lives in the `gitPilot` locale namespace (zh/en); colors use `--dsw-alias-*` tokens.
-- **HTTP routes**: eight authenticated exact routes on the connection service's fetch registry — `/api/git-pilot/read/*` (status, branches, session changes) and `/api/git-pilot/write/*` (create-branch, checkout) — the same mechanism the official `/api/changes.summary` route uses.
+- **HTTP routes**: eleven authenticated exact routes on the connection service's fetch registry — `/api/git-pilot/read/*` (status, branches, session changes, uncommitted changes, ui-options, ensure-baseline, session-file-diff) and `/api/git-pilot/write/*` (create-branch, checkout, commit, revert-file) — the same mechanism the official `/api/changes.summary` route uses. Content-level reads (`uncommitted`, `session-file-diff`) are registry-gated like the writes.
 
 ### Known limitations
 
 - Renames are shown as delete+add pairs (`--no-renames` keeps the `-z` parsing unambiguous). Submodule pointer moves are listed without counts (marked "submodule"); dirty submodule content is ignored as phantom work.
-- Untracked line counts skip empty lines; once git tracks the file its numstat counts every line.
+- Comparisons run tree-vs-tree through a private index, so untracked files carry exact numstat counts like tracked ones.
 - The Changes tab refreshes on navigation, window focus, a 30 s soft interval, and manual refresh — not on a live filesystem watch.
 - Branch switches affect the whole worktree (git semantics): other sessions on the same directory see the switch, hence the busy-session guard. A successful switch resets the baselines of every session on that workspace, so the panel restarts from the new branch's state.
-- Baselines live in Host memory and are anchored under `refs/git-pilot/<session>` so a `git gc` cannot erase them; after a Host restart the panel shows only the changes made after the restart (leftover anchor refs are harmless and never fetched).
+- Baselines live in Host memory and are anchored under `refs/git-pilot/<session>` so a `git gc` cannot erase them; after a Host restart the session re-attaches to its anchored baseline, so the cumulative summary survives restarts. A branch switch still resets every session baseline on that workspace by design.
+- The Changes tab's default scope is **Uncommitted** (whole worktree vs HEAD — the same numbers IDEA/Cursor show). The **This session** scope answers "what did this session change" against the session baseline; pre-session untracked files are baseline content, not session additions.
+- Commit writes the picked files' current worktree content (an uncommitted-scope action, like Cursor's commit): in the This-session scope, uncommitted changes those files carried before the session would be included — the commit button is therefore only offered in the Uncommitted scope.
 - Line-count reads for untracked files stop at `maxFiles` rows; a summary marked "truncated" may under-count beyond that.
 
 ## Develop
