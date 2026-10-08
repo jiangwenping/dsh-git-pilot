@@ -2,7 +2,9 @@
  * The provider's guide card on the sidebar-right start page: the Cursor-style
  * always-visible entry. Live session-change totals under the title; picking
  * the card opens this session's Changes tab through the enclosing tab's own
- * resource action.
+ * resource action. Geometry mirrors the shipped capsules' current stylesheet
+ * (width 380, radius xl, 0.5px l3 stroke, hover fill) so the card sits in the
+ * list without looking foreign.
  */
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { InjectFace, PropsLocale, PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
@@ -27,50 +29,6 @@ export type GitPilotGuideProps =
 
 /** Milliseconds between background stat refreshes while the card is mounted. */
 const REFRESH_INTERVAL_MS = 30_000
-
-/**
- * The shipped guide capsules' own geometry (sidebar-right's guide entries):
- * same border, radius, layer, padding, and type scale, so this card sits in
- * the list without looking foreign.
- */
-const styles = {
-  entry: {
-    boxSizing: 'border-box' as const,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    gap: 14,
-    width: '100%',
-    minWidth: 0,
-    minHeight: 56,
-    overflow: 'hidden',
-    padding: '14px 20px',
-    border: '0.5px solid var(--dsw-alias-border-l3)',
-    borderRadius: 24,
-    background: 'var(--dsw-alias-bg-layer-1)',
-    color: 'inherit',
-    cursor: 'pointer',
-    textAlign: 'left' as const,
-  },
-  icon: { flex: 'none', display: 'flex', color: 'var(--dsw-alias-label-tertiary)' },
-  text: { display: 'flex', flexDirection: 'column' as const, gap: 3, minWidth: 0 },
-  title: {
-    overflow: 'hidden',
-    color: 'var(--dsw-alias-label-primary)',
-    fontSize: 14,
-    lineHeight: 1.4,
-    whiteSpace: 'nowrap' as const,
-    textOverflow: 'ellipsis',
-  },
-  description: {
-    overflow: 'hidden',
-    color: 'var(--dsw-alias-label-caption)',
-    fontSize: 13,
-    lineHeight: 1.4,
-    whiteSpace: 'nowrap' as const,
-    textOverflow: 'ellipsis',
-  },
-}
 
 type Stats = { phase: 'loading' } | { phase: 'ready'; view: SessionChangesView | undefined }
 
@@ -125,14 +83,14 @@ export function GitPilotGuide({ kind, title, useTabInfo, changes, sessionId, t }
   return (
     <button
       type="button"
-      style={styles.entry}
+      className="dsh-git-pilot-guideEntry"
       data-sidebar-right-guide-entry={kind}
       onClick={() => { tab.actions.openResource(changesAddress(sessionId), { replaceTab: true }) }}
     >
-      <span style={styles.icon}><GitPilotGuideIcon size={26} /></span>
-      <span style={styles.text}>
-        <span style={styles.title}>{title}</span>
-        <span style={styles.description}>{line}</span>
+      <span className="dsh-git-pilot-guideIcon"><GitPilotGuideIcon size={26} /></span>
+      <span className="dsh-git-pilot-guideText">
+        <span className="dsh-git-pilot-guideTitle">{title}</span>
+        <span className="dsh-git-pilot-guideDescription">{line}</span>
       </span>
     </button>
   )

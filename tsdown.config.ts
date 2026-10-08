@@ -28,7 +28,12 @@ const client = defineConfig({
   dts: false,
   sourcemap: false,
   clean: false,
-  deps: { neverBundle: [/^react(?:\/.*)?$/] },
+  deps: {
+    // React and host packages resolve from the platform module table, so the
+    // browser module loader shares the shell's own bundled copies (styles and
+    // all) instead of a second, unstyled instance inside this bundle.
+    neverBundle: [/^react(?:\/.*)?$/, /^react-dom(?:\/.*)?$/, /^@deepseek-ai\//],
+  },
   define: {
     'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production'),
   },

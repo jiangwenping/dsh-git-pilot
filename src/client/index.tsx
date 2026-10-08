@@ -15,6 +15,7 @@ import { ChangesTabBody } from './changes-tab.tsx'
 import { changesAddress, changesTabDefinition, GIT_PILOT_CHANGES_ID } from './definition.ts'
 import { GitPilotGuide, type GitPilotGuideInjected } from './guide-card.tsx'
 import { en, NS, zh, type GitPilotKey } from './locales.ts'
+import { STYLES } from './styles.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -76,6 +77,16 @@ export function apply(rawContext: unknown): void {
     : (sessionId: string) => { ctx.sidebarRight?.openResource(changesAddress(sessionId)) }
 
   ctx.effect(() => locale.register(NS, { zh, en }), 'dsh-git-pilot: dictionaries')
+
+  // The plugin's one stylesheet rides the registration lifetime: the module
+  // system removes plugin-owned styles with the plugin on unload/HMR.
+  ctx.effect(() => {
+    const element = document.createElement('style')
+    element.dataset.dshGitPilot = 'styles'
+    element.textContent = STYLES
+    document.head.append(element)
+    return () => { element.remove() }
+  }, 'dsh-git-pilot: styles')
 
   const cwdOf = (sessionId: unknown): string | undefined => {
     const key = sessionId === undefined ? '' : String(sessionId)

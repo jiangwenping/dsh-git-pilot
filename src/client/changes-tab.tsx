@@ -1,5 +1,21 @@
-/** The right-Sidebar Changes tab: session-cumulative file and line totals with per-file diffs. */
+/**
+ * The right-Sidebar Changes tab: session-cumulative file and line totals with
+ * per-file diffs. Presentation rides the shared primitives (SegmentedControl,
+ * Input, Button, Checkbox, Tag, PathLabel, FileTypeIcon, the shared
+ * iconography) and the plugin stylesheet, so it reads like a shipped sidebar.
+ */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import {
+  Button,
+  Checkbox,
+  FileTypeIcon,
+  IconRefreshOutlineRegular,
+  IconTrashOutlineRegular,
+  Input,
+  PathLabel,
+  SegmentedControl,
+  Tag,
+} from '@deepseek-ai/dsh-client-ui-primitives'
 import type { ChangedFileView, DiffHunkView, FileDiffView, SessionChangesView } from '../wire.ts'
 import type { GitPilotApi } from './api.ts'
 import type { GitPilotKey } from './locales.ts'
@@ -23,223 +39,11 @@ export interface ChangesTabProps extends ChangesTabInject {
   useSessions?: TabHooks['useSessions']
 }
 
-const styles = {
-  root: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    height: '100%',
-    minHeight: 0,
-    color: 'var(--dsw-alias-label-primary, #ececec)',
-    fontSize: 13,
-  },
-  header: {
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 2,
-    padding: '12px 14px 8px',
-  },
-  branchLine: {
-    fontSize: 12,
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-  },
-  totals: {
-    fontSize: 13,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
-  added: { color: 'var(--dsw-alias-state-success-primary, #4ec96a)' },
-  deleted: { color: 'var(--dsw-alias-state-error-primary, #ff6b6b)' },
-  toolbar: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap' as const,
-    padding: '8px 14px',
-  },
-  ghost: {
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-    fontSize: 12,
-    cursor: 'pointer',
-    padding: '3px 6px',
-    borderRadius: 6,
-    whiteSpace: 'nowrap' as const,
-  },
-  scope: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 2,
-    background: 'rgba(128,128,128,0.12)',
-    borderRadius: 8,
-    padding: 2,
-  },
-  scopeChip: {
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-    fontSize: 12,
-    cursor: 'pointer',
-    padding: '2px 8px',
-    borderRadius: 6,
-    whiteSpace: 'nowrap' as const,
-  },
-  scopeActive: {
-    background: 'var(--dsw-alias-bg-overlay, #1f1f22)',
-    color: 'var(--dsw-alias-label-primary, #ececec)',
-  },
-  spring: { flex: 1 },
-  fileIcon: { flexShrink: 0, fontSize: 13 },
-  statusSide: { fontSize: 11, flexShrink: 0, whiteSpace: 'nowrap' as const },
-  refresh: {
-    border: '1px solid rgba(128,128,128,0.3)',
-    background: 'transparent',
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-    fontSize: 12,
-    borderRadius: 8,
-    padding: '3px 10px',
-    cursor: 'pointer',
-  },
-  list: {
-    listStyle: 'none',
-    margin: 0,
-    padding: '2px 6px 12px',
-    overflowY: 'auto' as const,
-    flex: 1,
-    minHeight: 0,
-  },
-  row: {
-    borderRadius: 8,
-    padding: '6px 8px',
-    cursor: 'pointer',
-    display: 'flex',
-    flexDirection: 'column' as const,
-    gap: 2,
-  },
-  rowHead: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    width: '100%',
-  },
-  path: {
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: 12,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap' as const,
-    flex: 1,
-  },
-  counts: { fontSize: 12, whiteSpace: 'nowrap' as const },
-  statusBadge: {
-    fontSize: 11,
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-    border: '1px solid rgba(128,128,128,0.3)',
-    borderRadius: 5,
-    padding: '0 4px',
-  },
-  note: {
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-    fontSize: 12,
-    padding: '8px 14px',
-  },
-  error: {
-    color: 'var(--dsw-alias-state-error-primary, #ff6b6b)',
-    fontSize: 12,
-    padding: '8px 14px',
-  },
-  checkbox: { accentColor: 'var(--dsw-alias-accent-primary, #4c8bf5)', flexShrink: 0 },
-  revert: {
-    border: 'none',
-    background: 'transparent',
-    color: 'var(--dsw-alias-label-secondary, #9a9a9a)',
-    fontSize: 13,
-    cursor: 'pointer',
-    padding: '0 4px',
-    flexShrink: 0,
-  },
-  commitBar: { display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px 8px' },
-  commitInput: {
-    flex: 1,
-    background: 'var(--dsw-alias-bg-base, #141414)',
-    border: '1px solid rgba(128,128,128,0.3)',
-    borderRadius: 8,
-    color: 'var(--dsw-alias-label-primary, #ececec)',
-    fontSize: 12,
-    padding: '5px 8px',
-  },
-  primaryButton: {
-    border: 'none',
-    borderRadius: 8,
-    padding: '5px 12px',
-    fontSize: 12,
-    cursor: 'pointer',
-    background: 'var(--dsw-alias-accent-primary, #4c8bf5)',
-    color: '#ffffff',
-    whiteSpace: 'nowrap' as const,
-  },
-  confirmStrip: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap' as const,
-    padding: '4px 0 2px 26px',
-  },
-  confirmText: { color: 'var(--dsw-alias-label-secondary, #9a9a9a)', fontSize: 12 },
-  dangerButton: {
-    border: '1px solid var(--dsw-alias-state-error-primary, #ff6b6b)',
-    borderRadius: 8,
-    background: 'transparent',
-    color: 'var(--dsw-alias-state-error-primary, #ff6b6b)',
-    fontSize: 12,
-    padding: '2px 10px',
-    cursor: 'pointer',
-  },
-  diff: {
-    margin: '4px 0 6px',
-    border: '1px solid rgba(128,128,128,0.2)',
-    borderRadius: 8,
-    overflowX: 'auto' as const,
-    background: 'var(--dsw-alias-bg-base, #141414)',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: 12,
-    lineHeight: '18px',
-  },
-  diffLine: {
-    display: 'flex',
-    whiteSpace: 'pre' as const,
-  },
-  lineNo: {
-    color: 'var(--dsw-alias-label-secondary, #777)',
-    userSelect: 'none' as const,
-    padding: '0 6px',
-    textAlign: 'right' as const,
-    minWidth: 34,
-    flexShrink: 0,
-  },
-  hunkHead: {
-    color: 'var(--dsw-alias-label-secondary, #8a8a8a)',
-    padding: '0 6px',
-    background: 'rgba(128,128,128,0.10)',
-  },
-}
-
-/** One-glyph stand-in for a file-type icon (zero-dependency; matches the plugin's glyph style). */
-function fileGlyph(path: string): string {
-  const lower = path.toLowerCase()
-  if (lower.endsWith('.java')) return '☕'
-  if (lower.endsWith('.md')) return '📝'
-  if (/\.(png|jpe?g|gif|webp|svg|ico)$/.test(lower)) return '🖼'
-  if (/\.(json|ya?ml|xml|properties)$/.test(lower)) return '⚙'
-  return '📄'
-}
-
-/** Cursor-style status ink: new/added green, removals red, rest secondary. */
-function statusInk(status: ChangedFileView['status']): { color: string } {
-  if (status === 'untracked' || status === 'added') return { color: 'var(--dsw-alias-state-success-primary, #4ec96a)' }
-  if (status === 'deleted' || status === 'unmerged') return { color: 'var(--dsw-alias-state-error-primary, #ff6b6b)' }
-  return { color: 'var(--dsw-alias-label-secondary, #9a9a9a)' }
+/** Cursor-style status ink as a Tag tone: new/added green, removals red, rest neutral. */
+function statusTone(status: ChangedFileView['status']): 'success' | 'danger' | 'outline' {
+  if (status === 'untracked' || status === 'added') return 'success'
+  if (status === 'deleted' || status === 'unmerged') return 'danger'
+  return 'outline'
 }
 
 function statusLabel(status: ChangedFileView['status'], t: ChangesTabProps['t']): string {
@@ -252,10 +56,10 @@ function statusLabel(status: ChangedFileView['status'], t: ChangesTabProps['t'])
   }
 }
 
-function lineColor(prefix: string): { color: string; background: string } {
-  if (prefix === '+') return { color: 'var(--dsw-alias-state-success-primary, #4ec96a)', background: 'rgba(78,201,106,0.10)' }
-  if (prefix === '-') return { color: 'var(--dsw-alias-state-error-primary, #ff6b6b)', background: 'rgba(255,107,107,0.10)' }
-  return { color: 'inherit', background: 'transparent' }
+function lineSign(prefix: string): 'added' | 'deleted' | 'context' {
+  if (prefix === '+') return 'added'
+  if (prefix === '-') return 'deleted'
+  return 'context'
 }
 
 function HunkBody({ hunk }: { hunk: DiffHunkView }): ReactNode {
@@ -263,17 +67,16 @@ function HunkBody({ hunk }: { hunk: DiffHunkView }): ReactNode {
   let newLine = hunk.newStart
   return (
     <>
-      <div style={{ ...styles.diffLine, ...styles.hunkHead }}>{`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`}</div>
+      <div className="dsh-git-pilot-diffLine dsh-git-pilot-hunkHead">{`@@ -${hunk.oldStart},${hunk.oldLines} +${hunk.newStart},${hunk.newLines} @@`}</div>
       {hunk.lines.map((line, index) => {
         const prefix = line.slice(0, 1)
-        const paint = lineColor(prefix)
         // A "\ No newline" marker belongs to the previous line: it renders
         // as a note and must not advance either counter.
         if (prefix === '\\') {
           return (
-            <div key={index} style={{ ...styles.diffLine, ...styles.hunkHead }}>
-              <span style={styles.lineNo}>{' '}</span>
-              <span style={{ flex: 1 }}>{line}</span>
+            <div key={index} className="dsh-git-pilot-diffLine dsh-git-pilot-hunkHead">
+              <span className="dsh-git-pilot-lineNo">{' '}</span>
+              <span className="dsh-git-pilot-lineText">{line}</span>
             </div>
           )
         }
@@ -286,9 +89,9 @@ function HunkBody({ hunk }: { hunk: DiffHunkView }): ReactNode {
         else if (prefix === '-') oldLine += 1
         else { oldLine += 1; newLine += 1 }
         return (
-          <div key={index} style={{ ...styles.diffLine, ...paint }}>
-            <span style={styles.lineNo}>{numbers}</span>
-            <span style={{ flex: 1 }}>{line === '' ? ' ' : line}</span>
+          <div key={index} className="dsh-git-pilot-diffLine" data-sign={lineSign(prefix)}>
+            <span className="dsh-git-pilot-lineNo">{numbers}</span>
+            <span className="dsh-git-pilot-lineText">{line === '' ? ' ' : line}</span>
           </div>
         )
       })}
@@ -315,21 +118,21 @@ function FileRow({
   t: ChangesTabProps['t']
 }): ReactNode {
   const counts = file.binary === true
-    ? <span style={styles.note}>{t('changes.binary')}</span>
+    ? <span className="dsh-git-pilot-note">{t('changes.binary')}</span>
     : file.oversized === true
-      ? <span style={styles.note}>{t('changes.oversized')}</span>
+      ? <span className="dsh-git-pilot-note">{t('changes.oversized')}</span>
       : file.gitlink === true
-        ? <span style={styles.note}>{t('changes.gitlink')}</span>
+        ? <span className="dsh-git-pilot-note">{t('changes.gitlink')}</span>
         : (
-          <span style={styles.counts}>
-            <span style={styles.added}>{`+${file.added}`}</span>
+          <span className="dsh-git-pilot-counts">
+            <span className="dsh-git-pilot-added">{`+${file.added}`}</span>
             {' '}
-            <span style={styles.deleted}>{`−${file.deleted}`}</span>
+            <span className="dsh-git-pilot-deleted">{`−${file.deleted}`}</span>
           </span>
         )
   return (
     <li
-      style={styles.row}
+      className="dsh-git-pilot-fileRow"
       onClick={onToggle}
       role="button"
       tabIndex={0}
@@ -340,64 +143,68 @@ function FileRow({
         onToggle()
       }}
     >
-      <div style={styles.rowHead}>
-        <span style={styles.fileIcon} aria-hidden>{fileGlyph(file.path)}</span>
-        <span style={styles.path} title={file.path}>{file.path}</span>
+      <div className="dsh-git-pilot-fileHead">
+        <span className="dsh-git-pilot-fileIcon" aria-hidden><FileTypeIcon path={file.path} size={16} /></span>
+        <PathLabel path={file.path} className="dsh-git-pilot-grow" />
         {counts}
-        <span style={{ ...styles.statusSide, ...statusInk(file.status) }}>{statusLabel(file.status, t)}</span>
+        <Tag className="dsh-git-pilot-statusSide" tone={statusTone(file.status)}>{statusLabel(file.status, t)}</Tag>
         {revertState === 'idle' && file.status !== 'untracked'
           ? (
             <button
               type="button"
-              style={styles.revert}
+              className="dsh-git-pilot-iconButton"
               title={t('revert.action')}
+              aria-label={t('revert.action')}
               disabled={revertBusy}
               onClick={event => { event.stopPropagation(); onRevertAsk() }}
             >
-              ↩
+              <IconTrashOutlineRegular />
             </button>
           )
           : null}
-        <input
-          type="checkbox"
-          style={styles.checkbox}
-          checked={selected}
-          onClick={event => event.stopPropagation()}
-          onChange={event => onSelect(event.target.checked)}
-          aria-label={file.path}
-        />
+        {/* Checkbox takes no click props; the wrapper keeps the pick from
+            toggling the row's own expansion. */}
+        <span onClick={event => event.stopPropagation()}>
+          <Checkbox
+            className="dsh-git-pilot-static"
+            checked={selected}
+            label=""
+            title={file.path}
+            onChange={onSelect}
+          />
+        </span>
       </div>
       {revertState !== 'idle'
         ? (
-          <div style={styles.confirmStrip} onClick={event => event.stopPropagation()}>
+          <div className="dsh-git-pilot-confirmStrip" onClick={event => event.stopPropagation()}>
             {revertState === 'confirm'
               ? (
                 <>
-                  <span style={styles.confirmText}>{t('revert.confirmTitle')}</span>
-                  <button type="button" style={styles.dangerButton} onClick={onRevertConfirm}>{t('revert.confirm')}</button>
-                  <button type="button" style={styles.refresh} onClick={onRevertCancel}>{t('revert.cancel')}</button>
+                  <span className="dsh-git-pilot-confirmStripText">{t('revert.confirmTitle')}</span>
+                  <Button size="sm" variant="primary" onClick={onRevertConfirm}>{t('revert.confirm')}</Button>
+                  <Button size="sm" variant="ghost" onClick={onRevertCancel}>{t('revert.cancel')}</Button>
                 </>
               )
-              : <span style={styles.confirmText}>{t('revert.working')}</span>}
+              : <span className="dsh-git-pilot-confirmStripText">{t('revert.working')}</span>}
           </div>
         )
         : null}
       {expanded
         ? (
-          <div style={styles.diff} onClick={event => event.stopPropagation()}>
+          <div className="dsh-git-pilot-diff" onClick={event => event.stopPropagation()}>
             {diff === undefined || diff === 'loading'
-              ? <div style={styles.note}>{t('menu.working')}</div>
+              ? <div className="dsh-git-pilot-note">{t('menu.working')}</div>
               : diff === 'failed'
-                ? <div style={styles.error}>{t('changes.loadFailed')}</div>
+                ? <div className="dsh-git-pilot-error">{t('changes.loadFailed')}</div>
                 : diff.kind === 'binary'
-                  ? <div style={styles.note}>{t('changes.binary')}</div>
+                  ? <div className="dsh-git-pilot-note">{t('changes.binary')}</div>
                   : diff.kind === 'oversized'
-                    ? <div style={styles.note}>{t('changes.oversized')}</div>
+                    ? <div className="dsh-git-pilot-note">{t('changes.oversized')}</div>
                     : diff.hunks.length === 0
-                      ? <div style={styles.note}>{t('changes.empty')}</div>
+                      ? <div className="dsh-git-pilot-note">{t('changes.empty')}</div>
                       : <>
                           {diff.hunks.map((hunk, index) => <HunkBody key={index} hunk={hunk} />)}
-                          {diff.truncated === true ? <div style={styles.note}>{t('changes.truncatedNote')}</div> : null}
+                          {diff.truncated === true ? <div className="dsh-git-pilot-note">{t('changes.truncatedNote')}</div> : null}
                         </>}
           </div>
         )
@@ -590,8 +397,8 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
 
   if (sessionKey === '' || summary === undefined) {
     return (
-      <div style={styles.root}>
-        {failed ? <div style={styles.note}>{t('changes.loadFailed')}</div> : loaded ? <div style={styles.note}>{t('changes.noData')}</div> : <div style={styles.note}>{t('menu.working')}</div>}
+      <div className="dsh-git-pilot-tab">
+        {failed ? <div className="dsh-git-pilot-note">{t('changes.loadFailed')}</div> : loaded ? <div className="dsh-git-pilot-note">{t('changes.noData')}</div> : <div className="dsh-git-pilot-note">{t('menu.working')}</div>}
       </div>
     )
   }
@@ -601,69 +408,79 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
   // presence marker alone decides.
   const repo = summary.repo !== false
   return (
-    <div style={styles.root}>
+    <div className="dsh-git-pilot-tab">
       {repo
         ? (
-          <div style={styles.toolbar}>
-            <div style={styles.scope} role="tablist">
-              <button type="button" style={{ ...styles.scopeChip, ...(scope === 'uncommitted' ? styles.scopeActive : {}) }} onClick={() => setScope('uncommitted')}>{t('scope.uncommitted')}</button>
-              <button type="button" style={{ ...styles.scopeChip, ...(scope === 'session' ? styles.scopeActive : {}) }} onClick={() => setScope('session')}>{t('scope.session')}</button>
-            </div>
-            <span style={styles.totals} title={totals}>
+          <div className="dsh-git-pilot-toolbar">
+            <SegmentedControl
+              id="git-pilot-scope"
+              label={t('changes.scope')}
+              value={scope}
+              onChange={setScope}
+              options={[
+                { value: 'uncommitted', label: t('scope.uncommitted') },
+                { value: 'session', label: t('scope.session') },
+              ]}
+            />
+            <span className="dsh-git-pilot-totals" title={totals}>
               <span aria-hidden>±</span>
               <span>{summary.total}</span>
-              <span style={styles.added}>{`+${summary.added}`}</span>
-              <span style={styles.deleted}>{`−${summary.deleted}`}</span>
+              <span className="dsh-git-pilot-added">{`+${summary.added}`}</span>
+              <span className="dsh-git-pilot-deleted">{`−${summary.deleted}`}</span>
             </span>
-            <span style={styles.branchLine}>{branchLine}</span>
-            <span style={styles.spring} />
-            <button type="button" style={styles.ghost} onClick={() => setAll(anyCollapsed)}>{anyCollapsed ? t('changes.expandAll') : t('changes.collapseAll')}</button>
-            <button type="button" style={styles.ghost} onClick={() => refresh({ force: true })} title={t('changes.refresh')}>⟳</button>
+            <span className="dsh-git-pilot-branchLine">{branchLine}</span>
+            <span className="dsh-git-pilot-spring" />
+            <Button size="sm" variant="ghost" onClick={() => setAll(anyCollapsed)}>{anyCollapsed ? t('changes.expandAll') : t('changes.collapseAll')}</Button>
+            <button type="button" className="dsh-git-pilot-iconButton" onClick={() => refresh({ force: true })} title={t('changes.refresh')} aria-label={t('changes.refresh')}>
+              <IconRefreshOutlineRegular />
+            </button>
             {scope === 'uncommitted' && cwd !== undefined && cwd !== '' && summary.files.length > 0 && commitPhase === 'idle'
               ? (
-                <button type="button" style={styles.primaryButton} onClick={() => { setCommitPhase('input'); setActionError(undefined) }}>
+                <Button size="sm" variant="primary" onClick={() => { setCommitPhase('input'); setActionError(undefined) }}>
                   {selectedCount > 0 ? `${t('commit.action')} ${selectedCount}/${summary.files.length}` : t('commit.action')}
-                </button>
+                </Button>
               )
               : null}
           </div>
         )
         : (
-          <div style={styles.header}>
-            <span style={styles.branchLine}>{t('changes.noRepo')}</span>
+          <div className="dsh-git-pilot-toolbar">
+            <span className="dsh-git-pilot-branchLine">{t('changes.noRepo')}</span>
           </div>
         )}
       {scope === 'uncommitted' && repo && cwd !== undefined && cwd !== '' && summary.files.length > 0 && (commitPhase === 'input' || commitPhase === 'working')
         ? (
-          <div style={styles.commitBar}>
-            <input
-              style={styles.commitInput}
+          <div className="dsh-git-pilot-commitBar">
+            <Input
+              className="dsh-git-pilot-commitInput"
               value={message}
               autoFocus
+              type="text"
               placeholder={t('commit.placeholder')}
+              aria-label={t('commit.placeholder')}
               onChange={event => setMessage(event.target.value)}
               onKeyDown={event => { if (event.key === 'Enter' && message.trim() !== '') doCommit() }}
               disabled={commitPhase === 'working'}
             />
             {commitPhase === 'working'
-              ? <span style={styles.confirmText}>{t('commit.working')}</span>
+              ? <span className="dsh-git-pilot-confirmStripText">{t('commit.working')}</span>
               : (
                 <>
-                  <button type="button" style={styles.primaryButton} disabled={message.trim() === ''} onClick={doCommit}>{t('commit.confirm')}</button>
-                  <button type="button" style={styles.ghost} onClick={() => { setCommitPhase('idle'); setActionError(undefined) }}>{t('revert.cancel')}</button>
+                  <Button size="sm" variant="primary" disabled={message.trim() === ''} onClick={doCommit}>{t('commit.confirm')}</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setCommitPhase('idle'); setActionError(undefined) }}>{t('revert.cancel')}</Button>
                 </>
               )}
           </div>
         )
         : null}
-      {actionError ? <div style={styles.error}>{actionError}</div> : null}
-      {failed ? <div style={styles.note}>{t('changes.loadFailed')}</div> : null}
+      {actionError ? <div className="dsh-git-pilot-error">{actionError}</div> : null}
+      {failed ? <div className="dsh-git-pilot-note">{t('changes.loadFailed')}</div> : null}
       {!repo
-        ? <div style={styles.note}>{t('changes.noRepo')}</div>
+        ? <div className="dsh-git-pilot-note">{t('changes.noRepo')}</div>
         : summary.files.length === 0
-        ? <div style={styles.note}>{scope === 'uncommitted' ? t('changes.emptyUncommitted') : t('changes.empty')}</div>
+        ? <div className="dsh-git-pilot-note">{scope === 'uncommitted' ? t('changes.emptyUncommitted') : t('changes.empty')}</div>
         : (
-          <ul style={styles.list}>
+          <ul className="dsh-git-pilot-list">
             {summary.files.map(file => (
               <FileRow
                 key={file.path}
@@ -684,7 +501,7 @@ export function ChangesTabBody(props: ChangesTabProps): ReactNode {
           </ul>
         )}
       {summary.truncated
-        ? <div style={styles.note}>{t('changes.truncated', { shown: summary.files.length, total: summary.total })}</div>
+        ? <div className="dsh-git-pilot-note">{t('changes.truncated', { shown: summary.files.length, total: summary.total })}</div>
         : null}
     </div>
   )

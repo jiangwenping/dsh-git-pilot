@@ -16,6 +16,9 @@ export type GitPilotKey =
   | 'menu.protectedConfirm'
   | 'menu.cancel'
   | 'menu.working'
+  | 'menu.aria'
+  | 'menu.local'
+  | 'menu.current'
   | 'menu.remote'
   | 'changes.tabTitle'
   | 'changes.onBranch'
@@ -42,6 +45,7 @@ export type GitPilotKey =
   | 'guide.uncommittedSummary'
   | 'scope.uncommitted'
   | 'scope.session'
+  | 'changes.scope'
   | 'changes.noData'
   | 'changes.emptyUncommitted'
   | 'commit.action'
@@ -74,6 +78,9 @@ export const zh: Record<GitPilotKey, string> = {
   'menu.protectedConfirm': '{name} 是受保护分支，通常不应直接切换。仍要继续吗？',
   'menu.cancel': '取消',
   'menu.working': '处理中…',
+  'menu.aria': '切换分支',
+  'menu.local': '本地分支',
+  'menu.current': '当前分支',
   'menu.remote': '远程分支',
   'changes.tabTitle': '变更',
   'changes.onBranch': '分支 {branch}',
@@ -116,6 +123,7 @@ export const zh: Record<GitPilotKey, string> = {
   'revert.failed': '恢复失败',
   'scope.uncommitted': '未提交',
   'scope.session': '本会话',
+  'changes.scope': '变更范围',
 }
 
 export const en: Record<GitPilotKey, string> = {
@@ -133,6 +141,9 @@ export const en: Record<GitPilotKey, string> = {
   'menu.protectedConfirm': '{name} is a protected branch and is usually not switched to directly. Continue?',
   'menu.cancel': 'Cancel',
   'menu.working': 'Working…',
+  'menu.aria': 'Switch branch',
+  'menu.local': 'Local branches',
+  'menu.current': 'Current branch',
   'menu.remote': 'Remote branches',
   'changes.tabTitle': 'Changes',
   'changes.onBranch': 'On {branch}',
@@ -175,4 +186,5 @@ export const en: Record<GitPilotKey, string> = {
   'revert.failed': 'Revert failed',
   'scope.uncommitted': 'Uncommitted',
   'scope.session': 'This session',
+  'changes.scope': 'Changes scope',
 }

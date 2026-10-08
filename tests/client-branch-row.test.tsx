@@ -70,12 +70,13 @@ describe('BranchControl', () => {
       remotes: [],
       truncated: false,
     }
-    const { container } = renderControl(clean, list)
+    renderControl(clean, list)
     fireEvent.click(await screen.findByTestId('git-pilot-branch-trigger'))
     expect(await screen.findByPlaceholderText('menu.searchPlaceholder')).toBeDefined()
     expect(screen.getByText('feature/one')).toBeDefined()
-    // The current branch carries the check mark inside the menu list.
-    expect(container.textContent).toContain('✓')
+    // The current branch is the checked option of the radio list.
+    expect(screen.getByRole('menuitemradio', { checked: true }).textContent).toBe('master')
+    expect(screen.getByRole('menuitemradio', { checked: false }).textContent).toBe('feature/one')
   })
 
   it('shows a display-only project chip when a workspace title is available', async () => {
