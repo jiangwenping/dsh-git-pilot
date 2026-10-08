@@ -403,7 +403,9 @@ export function createGitPilotService(deps: GitPilotDeps): GitPilotService {
     async status(workspacePath, signal = lifetime.signal): Promise<GitStatusView> {
       const git = await runner()
       const normalized = canonicalizePath(workspacePath)
-      if (git === null) return { isRepo: false, dirtyFiles: 0, added: 0, deleted: 0 }
+      // A disposed service answers the same degraded view a missing git does;
+      // late UI reads must not turn the teardown into a rejected promise.
+      if (git === null || lifetime.signal.aborted) return { isRepo: false, dirtyFiles: 0, added: 0, deleted: 0 }
       return repositoryStatus(git, normalized, signal)
     },
 

@@ -84,6 +84,10 @@ export class GitRunner {
   async run(args: readonly string[], options: GitRunOptions): Promise<GitRunResult> {
     const timeout = AbortSignal.timeout(this.limits.timeoutMs)
     const signal = AbortSignal.any([options.signal, timeout])
+    // A dead signal must reject before the spawn, never enter it: killing a
+    // child whose spawn has not completed yet can swallow both `error` and
+    // `exit`, which would leave the awaited `done` pending forever.
+    if (signal.aborted) throw new Error(`git ${args.join(' ')} was aborted`)
     const handle = this.subprocess.spawn({
       argv: [this.executable, ...args],
       cwd: options.cwd,

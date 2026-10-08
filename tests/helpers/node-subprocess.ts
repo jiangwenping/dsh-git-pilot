@@ -44,7 +44,11 @@ function spawnHandle(spec: SubprocessSpawnSpecLike): SubprocessHandleLike {
     child.on('exit', code => settle(code))
     child.on('error', () => settle(null))
     const signal = spec.signal
+    // An abort before the spawn attempt completes can swallow both child
+    // events, so the abort path settles `done` itself instead of relying on
+    // them; `null` already means "did not exit normally".
     const abort = (): void => {
+      settle(null)
       child.kill('SIGTERM')
       const timer = setTimeout(() => { child.kill('SIGKILL') }, GRACE_MS)
       timer.unref?.()
